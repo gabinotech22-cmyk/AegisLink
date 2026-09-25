@@ -41,6 +41,8 @@ fi
 echo
 echo "  Your relay:  http://${ONION}"
 echo
-echo "  In AegisLink: Privacy → Network → My relay → paste the .onion → Verify → Switch."
+./show-qr.sh "http://${ONION}"
+echo
+echo "  In AegisLink: Privacy → Network → My relay → scan the QR (or paste the .onion) → Verify → Switch."
 echo "  Back up the tor_keys volume: losing it changes this address."
 echo

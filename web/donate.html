@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,7 +16,7 @@
   html { background: var(--bg); }
   body { font-family: var(--sans); color: var(--text); line-height: 1.65; -webkit-font-smoothing: antialiased; }
   .wrap { max-width: 780px; margin: 0 auto; padding: 48px 22px 80px; }
-  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 40px; }
   header a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 20px; display: flex; align-items: center; gap: 12px; }
   h1 { font-size: 34px; line-height: 1.15; margin-bottom: 10px; }
   .meta { font-family: var(--mono); font-size: 13px; color: var(--accent); margin-bottom: 32px; }
@@ -43,12 +43,26 @@
     cursor: pointer; white-space: nowrap;
   }
   .copy:active { transform: translatey(1px); }
+  /* The label is per-language spans; the copy script toggles .copied. */
+  .copy .copy-done, .copy.copied .copy-idle { display: none; }
+  .copy.copied .copy-done { display: inline; }
   .qr { margin-top: 16px; }
   .qr img { width: 168px; height: 168px; border-radius: 10px; background: #fff; padding: 8px; display: block; }
   .placeholder { color: #e0b34a !important; }
   .note { font-style: italic; margin-top: 42px; color: var(--dim); font-size: 14.5px; }
   footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--dim); }
+  .lang-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+  .lang-switch button { background: transparent; border: none; color: var(--dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; padding: 7px 10px; cursor: pointer; }
+  .lang-switch button:hover { color: var(--text); }
+  .lang-switch button.active { background: rgba(91,242,185,0.14); color: var(--accent); }
+  /* lang.js sets html[data-lang]; without JS the English copy shows. */
+  html[data-lang="en"] [data-l]:not([data-l="en"]),
+  html[data-lang="es"] [data-l]:not([data-l="es"]),
+  html[data-lang="it"] [data-l]:not([data-l="it"]) { display: none !important; }
 </style>
+<script type="application/json" id="i18n-meta">{"en":{"title":"Support AegisLink","desc":"Support AegisLink with an anonymous cryptocurrency donation. No account, no name, no tracking — Monero and Bitcoin Lightning."},
+ "es":{"title":"Apoya AegisLink","desc":"Apoya AegisLink con una donación anónima en criptomonedas. Sin cuenta, sin nombre, sin rastreo — Monero y Bitcoin Lightning."},
+ "it":{"title":"Sostieni AegisLink","desc":"Sostieni AegisLink con una donazione anonima in criptovaluta. Nessun account, nessun nome, nessun tracciamento — Monero e Bitcoin Lightning."}}</script>
 </head>
 <body>
 <div class="wrap">
@@ -57,8 +71,32 @@
       <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/><rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/><rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/></svg>
       AegisLink
     </a>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="es" lang="es">ES</button>
+      <button type="button" data-lang="en" lang="en">EN</button>
+      <button type="button" data-lang="it" lang="it">IT</button>
+    </div>
   </header>
 
+  <!-- One <main>: the per-language prose carries data-l; the addresses, copy
+       buttons and QR codes appear once (their ids must stay unique). -->
+  <main>
+  <div data-l="es">
+  <h1>Apoya el proyecto</h1>
+  <p class="meta">100% financiado con donaciones · sin anuncios · sin rastreadores · sin inversores</p>
+
+  <p>AegisLink no tiene anuncios, ni analítica, ni capital riesgo. Se financia por completo gracias a personas que valoran la comunicación privada. Tu donación paga el relay y los servidores de llamadas autoalojados que mantienen la red en marcha — nada más.</p>
+
+  <h2>Las donaciones son anónimas por diseño</h2>
+  <p>No necesitas una cuenta, un nombre ni un correo para donar — y no deberías enviarnos ninguno. Usamos criptomonedas que protegen la privacidad precisamente para que una donación nunca pueda vincularse a tu identidad ni a tu AegisID. No guardamos ningún registro de quién ha donado.</p>
+  <ul>
+    <li><strong>Nunca vinculamos un pago a un AegisID.</strong> La app y el pago son sistemas completamente separados.</li>
+    <li><strong>No recopilamos datos personales.</strong> Sin nombre, sin correo, sin dirección de facturación — igual que en el resto de AegisLink.</li>
+    <li><strong>Para la máxima privacidad</strong>, usa un monedero sin custodia a través de Tor.</li>
+  </ul>
+  </div>
+
+  <div data-l="en">
   <h1>Support the project</h1>
   <p class="meta">100% donation-funded · no ads · no trackers · no investors</p>
 
@@ -71,16 +109,34 @@
     <li><strong>We collect no personal data.</strong> No name, no email, no billing address — the same as the rest of AegisLink.</li>
     <li><strong>For maximum privacy</strong>, use a non-custodial wallet over Tor.</li>
   </ul>
+  </div>
+
+  <div data-l="it">
+  <h1>Sostieni il progetto</h1>
+  <p class="meta">100% finanziato da donazioni · niente pubblicità · niente tracker · niente investitori</p>
+
+  <p>AegisLink non ha pubblicità, né analytics, né capitale di rischio. È finanziato interamente da persone che hanno a cuore la comunicazione privata. La tua donazione paga il relay e i server per le chiamate self-hosted che tengono in piedi la rete — nient'altro.</p>
+
+  <h2>Le donazioni sono anonime per progettazione</h2>
+  <p>Non ti servono un account, un nome o un'email per donare — e non dovresti inviarci nulla di tutto ciò. Usiamo criptovalute che tutelano la privacy proprio perché una donazione non possa mai essere ricondotta alla tua identità o al tuo AegisID. Non teniamo alcun registro di chi ha donato.</p>
+  <ul>
+    <li><strong>Non colleghiamo mai un pagamento a un AegisID.</strong> L'app e il pagamento sono sistemi completamente separati.</li>
+    <li><strong>Non raccogliamo dati personali.</strong> Nessun nome, nessuna email, nessun indirizzo di fatturazione — come nel resto di AegisLink.</li>
+    <li><strong>Per la massima privacy</strong>, usa un wallet non custodial tramite Tor.</li>
+  </ul>
+  </div>
 
   <h2>Monero (XMR)</h2>
   <div class="coin">
-    <h3>Monero <span class="tag">XMR · recommended</span></h3>
-    <p>The most private option: Monero transactions hide sender, receiver, and amount by default. This is the choice most aligned with what AegisLink stands for.</p>
+    <h3>Monero <span class="tag" data-l="es">XMR · recomendado</span><span class="tag" data-l="en">XMR · recommended</span><span class="tag" data-l="it">XMR · consigliato</span></h3>
+    <p data-l="es">La opción más privada: las transacciones de Monero ocultan por defecto el remitente, el destinatario y el importe. Es la opción más alineada con lo que representa AegisLink.</p>
+    <p data-l="en">The most private option: Monero transactions hide sender, receiver, and amount by default. This is the choice most aligned with what AegisLink stands for.</p>
+    <p data-l="it">L'opzione più privata: le transazioni Monero nascondono per impostazione predefinita mittente, destinatario e importo. È la scelta più in linea con ciò che AegisLink rappresenta.</p>
     <div class="addr-row">
       <!-- Live Monero primary address. To rotate it, replace the value below and
            re-run infra/deploy-web.sh; nothing else references it. -->
       <code class="addr" id="xmr-addr">47ZcXfMKHcJSQJEESCrczQDihepckQjfZZeufWEU8oFEdT1PBg7kDy7Sj2NWS69x9gW8mpmCKejqcgvtwiNtr3egPhvivGg</code>
-      <button class="copy" data-target="xmr-addr">Copy</button>
+      <button class="copy" data-target="xmr-addr"><span class="copy-idle"><span data-l="es">Copiar</span><span data-l="en">Copy</span><span data-l="it">Copia</span></span><span class="copy-done"><span data-l="es">Copiado</span><span data-l="en">Copied</span><span data-l="it">Copiato</span></span></button>
     </div>
     <!-- Optional QR: drop a file named qr-xmr.png next to this page and it appears automatically. -->
     <div class="qr"><img src="qr-xmr.png" alt="Monero donation QR" onerror="this.parentNode.remove()"></div>
@@ -88,22 +144,31 @@
 
   <h2>Bitcoin — Lightning Network</h2>
   <div class="coin">
-    <h3>Lightning <span class="tag">BTC · fast &amp; low-fee</span></h3>
-    <p>Bitcoin over the Lightning Network is fast, low-fee, and pseudonymous. Note that Lightning is pseudonymous, not fully private: your node or wallet may leak routing information. Use a non-custodial wallet over Tor for the strongest privacy.</p>
+    <h3>Lightning <span class="tag" data-l="es">BTC · rápido y con comisiones bajas</span><span class="tag" data-l="en">BTC · fast &amp; low-fee</span><span class="tag" data-l="it">BTC · veloce e con commissioni basse</span></h3>
+    <p data-l="es">Bitcoin sobre Lightning Network es rápido, con comisiones bajas y seudónimo. Ten en cuenta que Lightning es seudónimo, no totalmente privado: tu nodo o tu monedero pueden filtrar información de enrutamiento. Usa un monedero sin custodia a través de Tor para obtener la máxima privacidad.</p>
+    <p data-l="en">Bitcoin over the Lightning Network is fast, low-fee, and pseudonymous. Note that Lightning is pseudonymous, not fully private: your node or wallet may leak routing information. Use a non-custodial wallet over Tor for the strongest privacy.</p>
+    <p data-l="it">Bitcoin su Lightning Network è veloce, con commissioni basse e pseudonimo. Nota che Lightning è pseudonimo, non completamente privato: il tuo nodo o wallet può far trapelare informazioni di instradamento. Usa un wallet non custodial tramite Tor per la massima privacy.</p>
     <div class="addr-row">
       <!-- Live Lightning address. To rotate it, replace the value below (a
            Lightning address, BOLT11 invoice or LNURL all work) and re-run
            infra/deploy-web.sh. -->
       <code class="addr" id="ln-addr">exectera900@walletofsatoshi.com</code>
-      <button class="copy" data-target="ln-addr">Copy</button>
+      <button class="copy" data-target="ln-addr"><span class="copy-idle"><span data-l="es">Copiar</span><span data-l="en">Copy</span><span data-l="it">Copia</span></span><span class="copy-done"><span data-l="es">Copiado</span><span data-l="en">Copied</span><span data-l="it">Copiato</span></span></button>
     </div>
     <!-- Optional QR: drop a file named qr-lightning.png next to this page and it appears automatically. -->
     <div class="qr"><img src="qr-lightning.png" alt="Lightning donation QR" onerror="this.parentNode.remove()"></div>
   </div>
 
-  <p class="note">Thank you. Every donation keeps the servers running and the project independent. If you cannot donate, telling a friend about AegisLink helps just as much.</p>
+  <p class="note" data-l="es">Gracias. Cada donación mantiene los servidores en marcha y el proyecto independiente. Si no puedes donar, hablarle de AegisLink a un amigo ayuda igual.</p>
+  <p class="note" data-l="en">Thank you. Every donation keeps the servers running and the project independent. If you cannot donate, telling a friend about AegisLink helps just as much.</p>
+  <p class="note" data-l="it">Grazie. Ogni donazione tiene accesi i server e mantiene il progetto indipendente. Se non puoi donare, parlare di AegisLink a un amico aiuta altrettanto.</p>
+  </main>
 
-  <footer>© AegisLink · <a href="/">aegis-link.it</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></footer>
+  <footer>
+    <span data-l="en">© AegisLink · <a href="/">aegis-link.it</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a></span>
+    <span data-l="es">© AegisLink · <a href="/">aegis-link.it</a> · <a href="/privacy.html">Privacidad</a> · <a href="/terms.html">Términos</a></span>
+    <span data-l="it">© AegisLink · <a href="/">aegis-link.it</a> · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Termini</a></span>
+  </footer>
 </div>
 
 <script>
@@ -114,9 +179,10 @@
       if (!el) return;
       var text = el.textContent.trim();
       var done = function () {
-        var original = btn.textContent;
-        btn.textContent = 'Copied';
-        setTimeout(function () { btn.textContent = original; }, 1500);
+        // The label is per-language spans (.copy-idle / .copy-done), so flip a
+        // class instead of overwriting textContent.
+        btn.classList.add('copied');
+        setTimeout(function () { btn.classList.remove('copied'); }, 1500);
       };
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done).catch(function () {});
@@ -132,5 +198,6 @@
     });
   });
 </script>
+<script src="/lang.js"></script>
 </body>
 </html>

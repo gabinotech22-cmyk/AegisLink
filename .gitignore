@@ -65,3 +65,6 @@ server/.expo/
 
 # EAS local signing credentials (never commit)
 mobile/credentials.json
+
+# Self-host: QR of the relay address written by infra/selfhost/show-qr.sh
+infra/selfhost/relay-qr.png

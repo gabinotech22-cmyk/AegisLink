@@ -4,8 +4,8 @@
 #   - code:    /home/ubuntu/aegislink/server   (no git checkout on the VM)
 #   - service: systemd unit `aegislink` → node_modules/.bin/tsx src/index.ts
 #   - env:     /home/ubuntu/aegislink/.env (EnvironmentFile — never touched here)
-#   - nginx, coturn and the landing are managed separately
-#     (infra/nginx/*, infra/deploy-web.sh, run manually over SSH)
+#   - nginx, coturn and the landing are managed separately (infra/nginx/*;
+#     the landing + web pages ship with deploy-web.yml → infra/deploy-web.sh)
 #
 # Required GitHub secrets:
 #   DEPLOY_HOST     — public IP or hostname of the VM

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,7 +16,7 @@
   html { background: var(--bg); }
   body { font-family: var(--sans); color: var(--text); line-height: 1.65; -webkit-font-smoothing: antialiased; }
   .wrap { max-width: 780px; margin: 0 auto; padding: 48px 22px 80px; }
-  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 40px; }
   header a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 20px; display: flex; align-items: center; gap: 12px; }
   h1 { font-size: 34px; line-height: 1.15; margin-bottom: 10px; }
   .meta { font-family: var(--mono); font-size: 13px; color: var(--accent); margin-bottom: 36px; }
@@ -33,7 +33,18 @@
   th { color: var(--text); background: var(--bg-2); }
   .note { font-style: italic; margin-top: 42px; color: var(--dim); font-size: 14.5px; }
   footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--dim); }
+  .lang-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+  .lang-switch button { background: transparent; border: none; color: var(--dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; padding: 7px 10px; cursor: pointer; }
+  .lang-switch button:hover { color: var(--text); }
+  .lang-switch button.active { background: rgba(91,242,185,0.14); color: var(--accent); }
+  /* lang.js sets html[data-lang]; without JS the English copy shows. */
+  html[data-lang="en"] [data-l]:not([data-l="en"]),
+  html[data-lang="es"] [data-l]:not([data-l="es"]),
+  html[data-lang="it"] [data-l]:not([data-l="it"]) { display: none !important; }
 </style>
+<script type="application/json" id="i18n-meta">{"en":{"title":"Privacy Policy — AegisLink","desc":"AegisLink privacy policy: what we collect (almost nothing), what we never collect, and why the architecture makes it verifiable."},
+ "es":{"title":"Política de privacidad — AegisLink","desc":"Política de privacidad de AegisLink: qué recopilamos (casi nada), qué no recopilamos nunca y por qué la arquitectura permite verificarlo."},
+ "it":{"title":"Informativa sulla privacy — AegisLink","desc":"Informativa sulla privacy di AegisLink: cosa raccogliamo (quasi nulla), cosa non raccogliamo mai e perché l'architettura lo rende verificabile."}}</script>
 </head>
 <body>
 <div class="wrap">
@@ -42,8 +53,97 @@
       <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/><rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/><rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/></svg>
       AegisLink
     </a>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="es" lang="es">ES</button>
+      <button type="button" data-lang="en" lang="en">EN</button>
+      <button type="button" data-lang="it" lang="it">IT</button>
+    </div>
   </header>
 
+  <main data-l="es">
+  <h1>Política de privacidad</h1>
+  <p class="meta">Fecha de entrada en vigor: 2026-05-21 · Última actualización: 2026-07-16</p>
+  <p class="note">Traducción de cortesía. En caso de discrepancia, prevalece la versión en inglés.</p>
+
+  <p>AegisLink es una aplicación de mensajería cifrada que prioriza la privacidad. Esta política explica exactamente qué datos recopilamos, cuáles no recopilamos y por qué. La hemos escrito para que se lea, no para confundir.</p>
+
+  <h2>1. Quiénes somos</h2>
+  <p>AegisLink está operado por el proyecto AegisLink (contacto: ver §12). La aplicación es software de código abierto. La infraestructura del servidor relay es autoalojada y no depende de ningún proveedor de nube externo con acceso a los datos de los usuarios.</p>
+
+  <h2>2. Qué recopilamos</h2>
+  <p>Recopilamos el mínimo absoluto necesario para operar un servicio de mensajería basado en relay.</p>
+  <div class="tablewrap"><table>
+    <tr><th>Dato</th><th>Por qué</th><th>Cuánto tiempo</th></tr>
+    <tr><td>Un identificador seudónimo generado aleatoriamente (&ldquo;AegisID&rdquo;)</td><td>Para enrutar los mensajes cifrados a tu dispositivo</td><td>Hasta que elimines tu cuenta</td></tr>
+    <tr><td>Claves criptográficas públicas (clave de identidad, prekey firmada, prekeys de un solo uso)</td><td>Para que otros usuarios puedan establecer contigo una sesión E2EE sin una autoridad central</td><td>Hasta que las rotes o las elimines</td></tr>
+    <tr><td>Texto cifrado de los mensajes en tránsito</td><td>Para reenviar mensajes a destinatarios que están temporalmente sin conexión</td><td>Se elimina inmediatamente tras la entrega o, como máximo, a los 30 días si no se entrega</td></tr>
+    <tr><td>Token de push (un identificador de enrutamiento propio de la app emitido por Apple/Google — <strong>no</strong> un identificador de hardware ni de publicidad)</td><td>Para enviar una notificación genérica de activación cuando hay un mensaje esperando</td><td>Se guarda solo mientras estés registrado; se elimina al borrar la cuenta</td></tr>
+  </table></div>
+  <p>Esa es la lista completa.</p>
+  <p>No usamos SDK de analítica ni servicios de informes de fallos que envíen datos a servidores externos. El único servicio externo del que dependemos es la entrega de notificaciones push: las notificaciones de activación se enrutan a través del servicio push de Expo y de la infraestructura push de Apple/Google, que reciben solo tu token de push y un contenido genérico y vacío ("nuevo mensaje cifrado" / "llamada entrante") — nunca el contenido de los mensajes, el remitente, el destinatario ni ningún otro metadato.</p>
+
+  <h2>3. Qué NO recopilamos</h2>
+  <p>Los siguientes datos <strong>nunca</strong> se recopilan, almacenan ni transmiten a nuestros servidores:</p>
+  <ul>
+    <li>Tu nombre real, dirección de correo electrónico, número de teléfono o cualquier otra información de identificación personal</li>
+    <li>Tu dirección IP — el servidor relay descarta la IP de origen de cada conexión en la capa de middleware antes de que se escriba ningún registro</li>
+    <li>El contenido de los mensajes — todos los mensajes están cifrados de extremo a extremo; el relay solo recibe texto cifrado opaco y no puede leerlos</li>
+    <li>Metadatos de los mensajes, como con quién te comunicas, con qué frecuencia o el tamaño de los mensajes</li>
+    <li>Tu ubicación</li>
+    <li>Identificadores del dispositivo (IMEI, ID de publicidad, etc.)</li>
+    <li>Lista de contactos</li>
+    <li>Fotos de perfil o cualquier dato biométrico</li>
+    <li>Duración de las llamadas o interlocutores en las llamadas de voz/vídeo (la señalización es mínima y no se registra)</li>
+    <li>Marcas de tiempo de cuándo enviaste o recibiste mensajes concretos — el relay solo registra métricas generales a nivel de sistema (peticiones por minuto, número de errores) sin atribución a ningún usuario</li>
+  </ul>
+
+  <h2>4. Cifrado de extremo a extremo</h2>
+  <p>Todos los mensajes, adjuntos, llamadas de voz y videollamadas se cifran de extremo a extremo con el algoritmo Double Ratchet (claves de sesión con secreto hacia adelante) y el acuerdo de claves X3DH, implementados con la biblioteca TweetNaCl (criptografía de código abierto y auditable).</p>
+  <p><strong>Tus claves privadas nunca salen de tu dispositivo.</strong> Se generan en tu dispositivo durante la configuración, se guardan en el almacenamiento protegido de credenciales del sistema operativo (Keychain Services en iOS / Android Keystore, mediante <code>expo-secure-store</code>) y nunca se transmiten a ningún sitio.</p>
+  <p>El servidor relay de AegisLink es, por arquitectura, incapaz de leer tus mensajes. Aunque el servidor se viera comprometido o recibiera una orden legal, el texto cifrado que guarda sería computacionalmente inviable de descifrar sin las claves privadas, que solo existen en tu dispositivo.</p>
+
+  <h2>5. Mensajes efímeros</h2>
+  <p>AegisLink admite temporizadores de mensajes configurables por el usuario. Cuando se establece un temporizador, los mensajes se eliminan automáticamente de ambos dispositivos una vez transcurrido el tiempo indicado. Los mensajes eliminados se borran de forma permanente del almacenamiento del dispositivo y del relay (donde, de entrada, nunca se almacenaron en texto plano).</p>
+
+  <h2>6. Copias de seguridad</h2>
+  <p><strong>Copia de seguridad local:</strong> Cifrada con una clave derivada de una frase de contraseña que tú eliges. El archivo de copia se guarda solo en tu dispositivo. No tenemos acceso a él.</p>
+  <p><strong>Copia de seguridad remota (opcional):</strong> Si activas la copia remota, se sube un archivo cifrado a la ubicación de almacenamiento que elijas. La clave de cifrado se deriva únicamente de tu frase de contraseña y nunca se transmite a AegisLink. No podemos recuperar tu copia si pierdes tu frase de contraseña.</p>
+
+  <h2>7. Privacidad en los pagos (Lightning Network)</h2>
+  <p>AegisLink Work y las funciones premium opcionales pueden pagarse con Bitcoin a través de Lightning Network. Los pagos Lightning son seudónimos por diseño. No exigimos ninguna información personal para procesar un pago. No vinculamos la información de los canales de pago con los AegisID. Los recibos de pago se validan criptográficamente sin almacenar metadatos del pago más allá de la propia prueba de pago.</p>
+  <p>No aceptamos tarjetas de crédito, PayPal ni ningún método de pago que nos obligue a recopilar tu nombre, tu dirección de facturación o tu número de tarjeta.</p>
+
+  <h2>8. Conservación de datos</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Tipo de dato</th><th>Periodo de conservación</th></tr>
+    <tr><td>Mensajes cifrados no entregados</td><td>Máx. 30 días; se eliminan inmediatamente tras la entrega</td></tr>
+    <tr><td>Claves públicas (prekeys)</td><td>Hasta que se roten o se elimine la cuenta</td></tr>
+    <tr><td>Token de push</td><td>Mientras estés registrado; se elimina al borrar la cuenta</td></tr>
+    <tr><td>Registros del sistema en el servidor (agregados, sin atribución a usuarios)</td><td>7 días (ventana móvil)</td></tr>
+  </table></div>
+  <p>Al eliminar la cuenta, todos los datos asociados a tu AegisID se eliminan de forma permanente en un plazo de 24 horas. No hay conservación más allá de ese plazo.</p>
+
+  <h2>9. Código abierto y auditabilidad</h2>
+  <p>El código de la aplicación y el del servidor relay de AegisLink se publican como software de código abierto. Puedes inspeccionar cada operación criptográfica, cada handler del servidor y cada patrón de acceso a datos. Animamos a que se hagan auditorías de seguridad independientes. El código fuente está disponible en: <a href="https://github.com/gabinotech22-cmyk/AegisLink">github.com/gabinotech22-cmyk/AegisLink</a></p>
+  <p>Cualquiera puede verificar que lo que afirma esta política de privacidad se aplica técnicamente en el código, y no solo se declara en un documento.</p>
+
+  <h2>10. Menores</h2>
+  <p>AegisLink no recopila a sabiendas ninguna información de menores de 13 años. La app no está dirigida a niños. Si sabes que un niño se ha registrado, contacta con nosotros para que podamos eliminar la cuenta.</p>
+
+  <h2>11. Cambios en esta política</h2>
+  <p>Si hacemos cambios sustanciales en esta política, actualizaremos la fecha de entrada en vigor indicada arriba y publicaremos la nueva versión en el repositorio de código abierto, donde podrá revisarse con todo su historial de versiones. No haremos cambios que reduzcan tus protecciones de privacidad sin un aviso destacado.</p>
+
+  <h2>12. Contacto</h2>
+  <p>Para preguntas sobre privacidad, solicitudes de eliminación de datos o divulgación de problemas de seguridad:</p>
+  <ul>
+    <li>Correo: <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a></li>
+    <li>GitHub: <a href="https://github.com/gabinotech22-cmyk/AegisLink/security/advisories/new">avisos de seguridad</a> (para problemas de seguridad)</li>
+  </ul>
+
+  <p class="note">Una versión en español de esta política está disponible bajo petición. Envía un correo a aegislink.report@gmail.com con el asunto "Privacy Policy — Español".</p>
+  </main>
+
+  <main data-l="en">
   <h1>Privacy Policy</h1>
   <p class="meta">Effective date: 2026-05-21 · Last updated: 2026-07-16</p>
 
@@ -123,8 +223,97 @@
   </ul>
 
   <p class="note">Una versión en español de esta política está disponible bajo petición. Envíe un correo a aegislink.report@gmail.com con el asunto "Privacy Policy — Español".</p>
+  </main>
 
-  <footer>© AegisLink · <a href="/">aegis-link.it</a> · <a href="/terms.html">Terms</a> · <a href="/donate.html">Support</a> · <a href="/legal.html">Legal requests</a></footer>
+  <main data-l="it">
+  <h1>Informativa sulla privacy</h1>
+  <p class="meta">Data di entrata in vigore: 2026-05-21 · Ultimo aggiornamento: 2026-07-16</p>
+  <p class="note">Traduzione di cortesia. In caso di discrepanza prevale la versione inglese.</p>
+
+  <p>AegisLink è un'applicazione di messaggistica cifrata che mette la privacy al primo posto. Questa informativa spiega esattamente quali dati raccogliamo, quali non raccogliamo e perché. L'abbiamo scritta per essere letta, non per confondere.</p>
+
+  <h2>1. Chi siamo</h2>
+  <p>AegisLink è gestito dal progetto AegisLink (contatti: vedi §12). L'applicazione è software open source. L'infrastruttura del server relay è self-hosted e non dipende da alcun fornitore cloud terzo con accesso ai dati degli utenti.</p>
+
+  <h2>2. Cosa raccogliamo</h2>
+  <p>Raccogliamo il minimo indispensabile per gestire un servizio di messaggistica basato su relay.</p>
+  <div class="tablewrap"><table>
+    <tr><th>Dato</th><th>Perché</th><th>Per quanto tempo</th></tr>
+    <tr><td>Un identificatore pseudonimo generato casualmente (&ldquo;AegisID&rdquo;)</td><td>Per instradare i messaggi cifrati al tuo dispositivo</td><td>Finché non elimini il tuo account</td></tr>
+    <tr><td>Chiavi crittografiche pubbliche (chiave d'identità, prekey firmata, prekey monouso)</td><td>Per consentire agli altri utenti di stabilire con te una sessione E2EE senza un'autorità centrale</td><td>Finché non le ruoti o le elimini</td></tr>
+    <tr><td>Testo cifrato dei messaggi in transito</td><td>Per inoltrare i messaggi ai destinatari temporaneamente offline</td><td>Eliminato subito dopo la consegna o, al massimo, dopo 30 giorni se non consegnato</td></tr>
+    <tr><td>Token push (un identificatore di instradamento specifico dell'app emesso da Apple/Google — <strong>non</strong> un ID hardware o pubblicitario)</td><td>Per inviare una notifica di risveglio generica quando c'è un messaggio in attesa</td><td>Conservato solo finché sei registrato; eliminato con la cancellazione dell'account</td></tr>
+  </table></div>
+  <p>Questo è l'elenco completo.</p>
+  <p>Non usiamo SDK di analisi né servizi di segnalazione dei crash che inviano dati all'esterno. L'unico servizio esterno su cui facciamo affidamento è la consegna delle notifiche push: le notifiche di risveglio passano attraverso il servizio push di Expo e l'infrastruttura push di Apple/Google, che ricevono solo il tuo token push e un payload generico e privo di contenuto ("nuovo messaggio cifrato" / "chiamata in arrivo") — mai il contenuto dei messaggi, il mittente, il destinatario o altri metadati.</p>
+
+  <h2>3. Cosa NON raccogliamo</h2>
+  <p>I seguenti dati non vengono <strong>mai</strong> raccolti, conservati o trasmessi ai nostri server:</p>
+  <ul>
+    <li>Il tuo nome reale, indirizzo email, numero di telefono o qualsiasi altra informazione di identificazione personale</li>
+    <li>Il tuo indirizzo IP — il server relay scarta l'IP di origine di ogni connessione a livello di middleware prima che venga scritto qualsiasi log</li>
+    <li>Il contenuto dei messaggi — tutti i messaggi sono cifrati end-to-end; il relay riceve solo testo cifrato opaco e non può leggerli</li>
+    <li>Metadati dei messaggi, come con chi comunichi, con quale frequenza o le dimensioni dei messaggi</li>
+    <li>La tua posizione</li>
+    <li>Identificatori del dispositivo (IMEI, ID pubblicitario, ecc.)</li>
+    <li>Elenco dei contatti</li>
+    <li>Foto del profilo o qualsiasi dato biometrico</li>
+    <li>Durata delle chiamate o interlocutori delle chiamate vocali/video (la segnalazione è minima e non viene registrata)</li>
+    <li>Orari in cui hai inviato o ricevuto messaggi specifici — il relay registra solo metriche generiche a livello di sistema (richieste al minuto, numero di errori) senza attribuzione agli utenti</li>
+  </ul>
+
+  <h2>4. Cifratura end-to-end</h2>
+  <p>Tutti i messaggi, gli allegati, le chiamate vocali e le videochiamate sono cifrati end-to-end con l'algoritmo Double Ratchet (chiavi di sessione con forward secrecy) e l'accordo di chiavi X3DH, implementati con la libreria TweetNaCl (crittografia open source verificabile).</p>
+  <p><strong>Le tue chiavi private non lasciano mai il tuo dispositivo.</strong> Vengono generate sul tuo dispositivo durante la configurazione, conservate nell'archivio protetto delle credenziali del sistema operativo (Keychain Services su iOS / Android Keystore, tramite <code>expo-secure-store</code>) e non vengono mai trasmesse altrove.</p>
+  <p>Il server relay di AegisLink è, per architettura, incapace di leggere i tuoi messaggi. Anche se il server venisse compromesso o ricevesse un provvedimento legale, il testo cifrato che conserva sarebbe computazionalmente impossibile da decifrare senza le chiavi private, che esistono solo sul tuo dispositivo.</p>
+
+  <h2>5. Messaggi effimeri</h2>
+  <p>AegisLink supporta timer dei messaggi configurabili dall'utente. Quando è impostato un timer, i messaggi vengono eliminati automaticamente da entrambi i dispositivi allo scadere della durata indicata. I messaggi eliminati vengono rimossi definitivamente dalla memoria del dispositivo e dal relay (dove, del resto, non sono mai stati conservati in chiaro).</p>
+
+  <h2>6. Backup</h2>
+  <p><strong>Backup locale:</strong> cifrato con una chiave derivata da una passphrase scelta da te. Il file di backup è conservato solo sul tuo dispositivo. Non abbiamo accesso ad esso.</p>
+  <p><strong>Backup remoto (facoltativo):</strong> se attivi il backup remoto, un archivio cifrato viene caricato in una posizione di archiviazione a tua scelta. La chiave di cifratura è derivata esclusivamente dalla tua passphrase e non viene mai trasmessa ad AegisLink. Non possiamo recuperare il tuo backup se perdi la passphrase.</p>
+
+  <h2>7. Privacy dei pagamenti (Lightning Network)</h2>
+  <p>AegisLink Work e le funzioni premium facoltative possono essere pagate in Bitcoin tramite Lightning Network. I pagamenti Lightning sono pseudonimi per progettazione. Non richiediamo alcuna informazione personale per elaborare un pagamento. Non colleghiamo le informazioni sui canali di pagamento agli AegisID. Le ricevute di pagamento vengono convalidate crittograficamente senza conservare metadati di pagamento oltre alla prova di pagamento stessa.</p>
+  <p>Non accettiamo carte di credito, PayPal o qualsiasi metodo di pagamento che ci richiederebbe di raccogliere il tuo nome, l'indirizzo di fatturazione o il numero della carta.</p>
+
+  <h2>8. Conservazione dei dati</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Tipo di dato</th><th>Periodo di conservazione</th></tr>
+    <tr><td>Messaggi cifrati non consegnati</td><td>Max 30 giorni; eliminati subito dopo la consegna</td></tr>
+    <tr><td>Chiavi pubbliche (prekey)</td><td>Finché non vengono ruotate o l'account viene eliminato</td></tr>
+    <tr><td>Token push</td><td>Finché sei registrato; eliminato con la cancellazione dell'account</td></tr>
+    <tr><td>Log di sistema lato server (aggregati, senza attribuzione agli utenti)</td><td>7 giorni (finestra mobile)</td></tr>
+  </table></div>
+  <p>Con la cancellazione dell'account, tutti i dati associati al tuo AegisID vengono eliminati definitivamente entro 24 ore. Non c'è alcuna conservazione oltre questo intervallo.</p>
+
+  <h2>9. Open source e verificabilità</h2>
+  <p>Il codice dell'applicazione e quello del server relay di AegisLink sono pubblicati come software open source. Puoi ispezionare ogni operazione crittografica, ogni handler lato server e ogni schema di accesso ai dati. Incoraggiamo audit di sicurezza indipendenti. Il codice sorgente è disponibile su: <a href="https://github.com/gabinotech22-cmyk/AegisLink">github.com/gabinotech22-cmyk/AegisLink</a></p>
+  <p>Chiunque può verificare che quanto affermato in questa informativa sia applicato tecnicamente nel codice, e non solo dichiarato in un documento.</p>
+
+  <h2>10. Minori</h2>
+  <p>AegisLink non raccoglie consapevolmente alcuna informazione da persone di età inferiore ai 13 anni. L'app non è rivolta ai bambini. Se vieni a sapere che un bambino si è registrato, contattaci affinché possiamo eliminare l'account.</p>
+
+  <h2>11. Modifiche a questa informativa</h2>
+  <p>Se apportiamo modifiche sostanziali a questa informativa, aggiorneremo la data di entrata in vigore indicata sopra e pubblicheremo la nuova versione nel repository open source, dove potrà essere esaminata con la cronologia completa delle versioni. Non apporteremo modifiche che riducano le tue tutele della privacy senza un avviso ben visibile.</p>
+
+  <h2>12. Contatti</h2>
+  <p>Per domande sulla privacy, richieste di cancellazione dei dati o segnalazioni di sicurezza:</p>
+  <ul>
+    <li>Email: <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a></li>
+    <li>GitHub: <a href="https://github.com/gabinotech22-cmyk/AegisLink/security/advisories/new">avvisi di sicurezza</a> (per problemi di sicurezza)</li>
+  </ul>
+
+  <p class="note">Una versione in spagnolo di questa informativa è disponibile su richiesta. Invia un'email ad aegislink.report@gmail.com con oggetto "Privacy Policy — Español".</p>
+  </main>
+
+  <footer>
+    <span data-l="en">© · <a href="/">aegis-link.it</a> · <a href="/terms.html">Terms</a> · <a href="/donate.html">Support</a> · <a href="/legal.html">Legal requests</a></span>
+    <span data-l="es">© · <a href="/">aegis-link.it</a> · <a href="/terms.html">Términos</a> · <a href="/donate.html">Apoyar</a> · <a href="/legal.html">Solicitudes legales</a></span>
+    <span data-l="it">© · <a href="/">aegis-link.it</a> · <a href="/terms.html">Termini</a> · <a href="/donate.html">Sostieni</a> · <a href="/legal.html">Richieste legali</a></span>
+  </footer>
 </div>
+<script src="/lang.js"></script>
 </body>
 </html>
