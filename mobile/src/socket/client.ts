@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import { logger } from '../utils/logger';
-import { nacl } from '../crypto/sodium';
+import { nacl, ml_kem768 } from '../crypto/sodium';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -42,7 +42,6 @@ import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
 import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import { performX3DH, performX3DHReceiver, generatePreKeys, shouldUsePqReceiver, type PreKeyBundle, type PqSignedPreKeyPublic } from '../crypto/signal/x3dh';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
 import { themedAlert } from '../components/AlertHost';
 import { nextOutboxDelayMs, isOutboxJobExpired } from '../db/outboxBackoff';

@@ -85,6 +85,10 @@ static int dispatch(const char *op, arg_t *args, int n) {
   OP("hkdf_sha256", 4, aegis_hkdf_sha256(A(0), A(1), A(2), A(3)))
   OP("argon2id", 5, aegis_argon2id(A(0), A(1), A(2), u32(&args[3]), u32(&args[4])))
   OP("pow_sha256", 3, aegis_pow_sha256(A(0), A(1), u32(&args[2])))
+  OP("mlkem768_keypair", 2, aegis_mlkem768_keypair(A(0), A(1)))
+  OP("mlkem768_seed_keypair", 3, aegis_mlkem768_seed_keypair(A(0), A(1), A(2)))
+  OP("mlkem768_enc", 3, aegis_mlkem768_enc(A(0), A(1), A(2)))
+  OP("mlkem768_dec", 3, aegis_mlkem768_dec(A(0), A(1), A(2)))
 #undef OP
   return -101;
 }

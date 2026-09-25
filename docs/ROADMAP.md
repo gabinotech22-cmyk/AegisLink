@@ -176,6 +176,7 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
       en memoria nativa (módulo en mobile, proceso main en desktop) y JS recibe un handle, como
       libsignal. Un XSS en el renderer ya no podría leer claves. F-1 cierra el timing del JIT pero no
       saca las claves del heap de JS.
+      Incluye ML-KEM-768 nativo en desktop (ver abajo).
 - [x] **Argon2id nativo en mobile** ✅ (#549; efectivo desde el primer build nativo que lo incluya):
       PIN y backup v3 corren en libsodium nativo, fuera del hilo de JS. **Sin formato de backup
       nuevo**: el núcleo C llama a `argon2id_hash_raw` (acepta salts de 8–64 B), así que los backups
@@ -193,9 +194,20 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
       `modules/aegis-sodium/test/differential.mjs` (núcleo C vs minero JS de referencia, incl.
       dificultad 18 y challenge no ASCII), `crypto/__tests__/registration.solvePoW.test.ts`,
       `sodium-facade.test.ts`. Desktop sigue en JS (V8 con JIT).
-- [ ] **ML-KEM-768 nativo**: sigue en @noble. libsodium 1.0.22 (ya vendorizado) trae
-      `crypto_kem_mlkem768`; moverlo exige probar compatibilidad byte a byte con @noble/post-quantum
-      (claves de prekeys PQ ya publicadas) antes de cambiar.
+- [x] **ML-KEM-768 nativo en mobile** ✅ (efectivo desde el primer build nativo que lo incluya):
+      PQXDH (prekeys PQ) y el ratchet PQ corren en `crypto_kem_mlkem768` de libsodium, tras la
+      fachada `ml_kem768` (misma API que @noble). **Sin migración**: byte a byte idéntico a
+      @noble/post-quantum (misma semilla → mismo par de claves y misma clave secreta expandida de
+      2400 B, descapsulación cruzada, mismo secreto de rechazo implícito), así que las prekeys PQ
+      ya publicadas y los estados de ratchet guardados siguen funcionando. `@noble/post-quantum`
+      pasa a devDependency (oráculo). Pruebas: `modules/aegis-sodium/test/differential.mjs`
+      (núcleo C vs @noble, incl. claves generadas como las generaba la app y rechazo de claves
+      inválidas), `sodium-facade.test.ts`, `f1-golden.test.ts` (sesión híbrida persistida con
+      @noble 0.6.1), `crypto-imports.test.ts` (nada de @noble/post-quantum en producción).
+- [ ] **ML-KEM-768 nativo en desktop**: sigue en @noble. `sodium-native` no trae ML-KEM, y el
+      BoringSSL de Electron 42 genera claves ML-KEM pero **no importa la clave pública de otro**
+      (no puede encapsular; probado en DER/SPKI, PEM, raw y JWK). Decisión del dueño (2026-09-25):
+      se resuelve dentro de F-1b, cuando las claves del desktop salgan del renderer.
 - [ ] Cerrar los "partial coverage" de la auditoría: zeroización en intermedios X3DH/PQXDH,
       `assertNonZero` ML-KEM, barrido constant-time de comparaciones restantes.
 

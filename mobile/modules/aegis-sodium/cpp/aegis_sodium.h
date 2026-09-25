@@ -98,6 +98,28 @@ int aegis_argon2id(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdle
 #define AEGIS_POW_DIFFICULTY_MAX 32
 int aegis_pow_sha256(uint8_t *nonce, size_t noncelen, const uint8_t *challenge, size_t challen, uint32_t difficulty);
 
+/*
+ * ML-KEM-768 (FIPS 203), libsodium's crypto_kem_mlkem768. Byte-compatible with
+ * @noble/post-quantum, which the app used before: same seed -> key pair, same
+ * 2400-byte expanded secret key (dk), same ciphertexts and shared secrets, same
+ * implicit rejection of a tampered ciphertext, so stored PQ prekeys and ratchet
+ * states keep working. The shared secret is secret: callers zero it when done.
+ */
+#define AEGIS_MLKEM768_PK 1184
+#define AEGIS_MLKEM768_SK 2400
+#define AEGIS_MLKEM768_CT 1088
+#define AEGIS_MLKEM768_SS 32
+#define AEGIS_MLKEM768_SEED 64
+int aegis_mlkem768_keypair(uint8_t *pk, size_t pklen, uint8_t *sk, size_t sklen);
+/* Deterministic key pair from a 64-byte seed (d || z); for test vectors. */
+int aegis_mlkem768_seed_keypair(uint8_t *pk, size_t pklen, uint8_t *sk, size_t sklen, const uint8_t *seed,
+                                size_t seedlen);
+/* AEGIS_EFAIL if the public key fails FIPS 203's encapsulation-key check. */
+int aegis_mlkem768_enc(uint8_t *ct, size_t ctlen, uint8_t *ss, size_t sslen, const uint8_t *pk, size_t pklen);
+/* AEGIS_OK for any well-formed ciphertext (implicit rejection); AEGIS_EFAIL if the secret key
+ * fails FIPS 203's hash check (H(ek) embedded in dk), as @noble's decapsulate does. */
+int aegis_mlkem768_dec(uint8_t *ss, size_t sslen, const uint8_t *ct, size_t ctlen, const uint8_t *sk, size_t sklen);
+
 #ifdef __cplusplus
 }
 #endif

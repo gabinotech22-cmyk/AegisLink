@@ -1,7 +1,6 @@
-import { nacl } from '../sodium';
+import { nacl, ml_kem768 } from '../sodium';
 import { logger } from '../../utils/logger';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { hkdfSHA256 } from './kdf';
 import { type Identity } from '../identity';
 import { verifyDetached } from '../ed25519';

@@ -12,13 +12,16 @@
  * Argon2id: libsodium's crypto_pwhash for 16-byte salts; @noble/hashes for the
  * rest (sodium-native exposes no other salt length, and node:crypto has no
  * Argon2 before Node 24.7). The proof-of-work miner is the C core's loop over
- * libsodium's SHA-256.
+ * libsodium's SHA-256. ML-KEM-768: @noble/post-quantum (sodium-native has no
+ * ML-KEM), with the C core's lengths and return codes; the C core is diffed
+ * against it byte for byte.
  *
  * The shipped C core itself is tested against TweetNaCl/@noble by
  * `../test/differential.mjs` (CI job `aegis-sodium-native`).
  */
 import { createHmac } from 'node:crypto';
 import { argon2id } from '@noble/hashes/argon2';
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import sodium from 'sodium-native';
 import type { AegisSodiumNative } from '../index';
 
@@ -34,6 +37,9 @@ const KEY = 32;
 const SIGN_SK = 64;
 const SIG = 64;
 const HKDF_MAX = 255 * 32;
+const MLKEM_PK = 1184;
+const MLKEM_SK = 2400;
+const MLKEM_CT = 1088;
 
 // "expand 32-byte k", little-endian words (HSalsa20 = Salsa20 core without feed-forward).
 const SIGMA = [0x61707865, 0x3320646e, 0x79622d32, 0x6b206574];
@@ -187,6 +193,40 @@ const nodeBackend: AegisSodiumNative = {
       return Array.from(out);
     }
     return Array.from(argon2id(pwd, salt, { t, m: mKib, p: 1, dkLen: outLen }));
+  },
+  mlkem768Keypair: (pk, sk) => {
+    if (!len([pk, MLKEM_PK], [sk, MLKEM_SK])) return EBADLEN;
+    const k = ml_kem768.keygen();
+    pk.set(k.publicKey);
+    sk.set(k.secretKey);
+    return OK;
+  },
+  mlkem768SeedKeypair: (pk, sk, seed) => {
+    if (!len([pk, MLKEM_PK], [sk, MLKEM_SK], [seed, 64])) return EBADLEN;
+    const k = ml_kem768.keygen(seed);
+    pk.set(k.publicKey);
+    sk.set(k.secretKey);
+    return OK;
+  },
+  mlkem768Enc: (ct, ss, pk) => {
+    if (!len([ct, MLKEM_CT], [ss, 32], [pk, MLKEM_PK])) return EBADLEN;
+    try {
+      const e = ml_kem768.encapsulate(pk);
+      ct.set(e.cipherText);
+      ss.set(e.sharedSecret);
+      return OK;
+    } catch {
+      return EFAIL; // FIPS 203 encapsulation-key check, as in the C core
+    }
+  },
+  mlkem768Dec: (ss, ct, sk) => {
+    if (!len([ss, 32], [ct, MLKEM_CT], [sk, MLKEM_SK])) return EBADLEN;
+    try {
+      ss.set(ml_kem768.decapsulate(ct, sk));
+      return OK;
+    } catch {
+      return EFAIL; // FIPS 203 decapsulation-key (hash) check, as in the C core
+    }
   },
   // The C core's miner, step for step: nonces "00000000", "00000001", ... hashed
   // in front of the challenge with libsodium's SHA-256.

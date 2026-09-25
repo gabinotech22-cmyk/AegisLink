@@ -1,6 +1,5 @@
-import { nacl } from '../sodium';
+import { nacl, ml_kem768 } from '../sodium';
 import { encodeBase64 } from 'tweetnacl-util';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { hkdfSHA256, hmacSHA256 } from './kdf';
 
 // ML-KEM-768 fixed sizes (FIPS 203, Table 3) — used for strict length checks.

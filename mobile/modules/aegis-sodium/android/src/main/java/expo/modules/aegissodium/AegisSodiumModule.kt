@@ -39,6 +39,10 @@ internal object AegisSodiumNative {
   @JvmStatic external fun hkdfSha256(out: ByteBuffer?, ikm: ByteBuffer?, salt: ByteBuffer?, info: ByteBuffer?): Int
   @JvmStatic external fun argon2id(out: ByteBuffer?, pwd: ByteBuffer?, salt: ByteBuffer?, t: Int, m: Int): Int
   @JvmStatic external fun powSha256(nonce: ByteBuffer?, challenge: ByteBuffer?, difficulty: Int): Int
+  @JvmStatic external fun mlkem768Keypair(pk: ByteBuffer?, sk: ByteBuffer?): Int
+  @JvmStatic external fun mlkem768SeedKeypair(pk: ByteBuffer?, sk: ByteBuffer?, seed: ByteBuffer?): Int
+  @JvmStatic external fun mlkem768Enc(ct: ByteBuffer?, ss: ByteBuffer?, pk: ByteBuffer?): Int
+  @JvmStatic external fun mlkem768Dec(ss: ByteBuffer?, ct: ByteBuffer?, sk: ByteBuffer?): Int
 }
 
 /** A direct view of the JS array's memory, or null when it is empty (Hermes may give it no storage). */
@@ -133,6 +137,16 @@ class AegisSodiumModule : Module() {
     }
     Function("hkdfSha256") { out: Uint8Array, ikm: Uint8Array, salt: Uint8Array, info: Uint8Array ->
       AegisSodiumNative.hkdfSha256(b(out), b(ikm), b(salt), b(info))
+    }
+    Function("mlkem768Keypair") { pk: Uint8Array, sk: Uint8Array -> AegisSodiumNative.mlkem768Keypair(b(pk), b(sk)) }
+    Function("mlkem768SeedKeypair") { pk: Uint8Array, sk: Uint8Array, seed: Uint8Array ->
+      AegisSodiumNative.mlkem768SeedKeypair(b(pk), b(sk), b(seed))
+    }
+    Function("mlkem768Enc") { ct: Uint8Array, ss: Uint8Array, pk: Uint8Array ->
+      AegisSodiumNative.mlkem768Enc(b(ct), b(ss), b(pk))
+    }
+    Function("mlkem768Dec") { ss: Uint8Array, ct: Uint8Array, sk: Uint8Array ->
+      AegisSodiumNative.mlkem768Dec(b(ss), b(ct), b(sk))
     }
     AsyncFunction("argon2id") { pwd: ByteArray, salt: ByteArray, t: Int, mKib: Int, outLen: Int ->
       argon2id(pwd, salt, t, mKib, outLen)

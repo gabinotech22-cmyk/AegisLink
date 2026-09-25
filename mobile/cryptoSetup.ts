@@ -1,11 +1,12 @@
 // CRITICAL — imported FIRST from index.ts, before App and any crypto library.
 //
-// React Native exposes no Web Crypto. The NaCl primitives (src/crypto/sodium)
-// take their randomness from native libsodium directly, but @noble/* (ML-KEM
-// for PQXDH prekeys, Argon2/PBKDF2 salts) needs globalThis.crypto.getRandomValues,
-// which @noble/hashes captures AT MODULE-LOAD time. ml_kem768.keygen() calls it
-// during registration; without it the relay registration throws
-// "crypto.getRandomValues must be defined" and the identity is never published.
+// React Native exposes no Web Crypto. The primitives in src/crypto/sodium
+// (NaCl, ML-KEM-768, Argon2id) take their randomness from native libsodium
+// directly, but any @noble/* helper that draws randomness needs
+// globalThis.crypto.getRandomValues, which @noble/hashes captures AT MODULE-LOAD
+// time. When ML-KEM still ran on @noble, a missing shim made registration throw
+// "crypto.getRandomValues must be defined" and the identity was never
+// published; the shim stays so no library can hit that again.
 // Because ES imports are hoisted, this shim MUST be installed in a module that
 // is imported before App's @noble import chain evaluates — hence this dedicated
 // file rather than inline code in index.ts.

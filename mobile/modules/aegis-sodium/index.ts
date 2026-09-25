@@ -42,6 +42,10 @@ export interface AegisSodiumNative {
   signVerifyDetached(sig: B, m: B, pk: B): number;
   hmacsha256(out: B, m: B, k: B): number;
   hkdfSha256(out: B, ikm: B, salt: B, info: B): number;
+  mlkem768Keypair(pk: B, sk: B): number;
+  mlkem768SeedKeypair(pk: B, sk: B, seed: B): number;
+  mlkem768Enc(ct: B, ss: B, pk: B): number;
+  mlkem768Dec(ss: B, ct: B, sk: B): number;
   /**
    * Argon2id, one lane. The only ASYNC function: it runs on a background thread
    * for hundreds of milliseconds, so it takes copies and resolves to the key as

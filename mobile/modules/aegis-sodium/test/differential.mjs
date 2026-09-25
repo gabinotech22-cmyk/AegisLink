@@ -3,7 +3,8 @@
  * Differential test of the aegis_sodium C core compiled with the vendored
  * libsodium (F-1 B2) against the JavaScript implementations the app used
  * before (TweetNaCl, @noble/hashes): identical bytes on random inputs and on
- * RFC vectors (Argon2id also at the app's exact PIN and backup parameters), plus the C core's own contract (length validation, NULL
+ * RFC vectors (Argon2id also at the app's exact PIN and backup parameters;
+ * ML-KEM-768 against @noble/post-quantum), plus the C core's own contract (length validation, NULL
  * handling, fail-closed on low-order points, rejected small-order signatures).
  *
  *   cmake -S modules/aegis-sodium/test -B build/aegis-sodium-host -G Ninja
@@ -23,6 +24,7 @@ const { hmac } = require('@noble/hashes/hmac');
 const { hkdf } = require('@noble/hashes/hkdf');
 const { sha256 } = require('@noble/hashes/sha2');
 const { argon2id } = require('@noble/hashes/argon2');
+const { ml_kem768 } = await import('@noble/post-quantum/ml-kem.js');
 
 const OK = 0;
 const EVERIFY = 1;
@@ -179,6 +181,46 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
   pow('x'.repeat(512), 4); // longest accepted challenge
 }
 
+// ML-KEM-768 against @noble/post-quantum, which wrote every PQ prekey and
+// ratchet key stored today: same seed -> same key pair (and the same 2400-byte
+// secret key), and each side decapsulates what the other encapsulated, including
+// the implicit-rejection secret of a tampered ciphertext.
+{
+  for (let i = 0; i < Math.min(ITER, 60); i++) {
+    const seed = rand(64);
+    const k = ml_kem768.keygen(seed);
+    call('mlkem768_seed_keypair', ['#1184', '#2400', seed], expectBytes(k.publicKey, k.secretKey));
+    const e = ml_kem768.encapsulate(k.publicKey);
+    call('mlkem768_dec', ['#32', e.cipherText, k.secretKey], expectBytes(e.sharedSecret));
+    const bad = e.cipherText.slice();
+    bad[randInt(bad.length - 1)] ^= 1 << randInt(7);
+    call('mlkem768_dec', ['#32', bad, k.secretKey], expectBytes(ml_kem768.decapsulate(bad, k.secretKey)));
+    // C encapsulates, @noble decapsulates to the same secret.
+    call('mlkem768_enc', ['#1088', '#32', k.publicKey], (rc, [ct, ss]) =>
+      rc === OK && eq(ml_kem768.decapsulate(ct, k.secretKey), ss) ? null : 'noble cannot decapsulate the C ciphertext');
+  }
+  // A key pair made the way the app made them (keygen() with no seed): C decapsulates.
+  const k = ml_kem768.keygen();
+  const e = ml_kem768.encapsulate(k.publicKey);
+  call('mlkem768_dec', ['#32', e.cipherText, k.secretKey], expectBytes(e.sharedSecret));
+  // Fresh C key pairs are consistent: @noble encapsulates to the pk, C decapsulates.
+  call('mlkem768_keypair', ['#1184', '#2400'], (rc, [pk, sk]) => {
+    if (rc !== OK) return `rc ${rc}`;
+    if (!eq(ml_kem768.getPublicKey(sk), pk)) return 'pk is not the one embedded in sk';
+    return null;
+  });
+  // FIPS 203 encapsulation-key check: a non-canonical coefficient (0xfff > q) fails closed.
+  const nonCanonical = k.publicKey.slice();
+  nonCanonical[0] = 0xff;
+  nonCanonical[1] |= 0x0f;
+  call('mlkem768_enc', ['#1088', '#32', nonCanonical], expectRc(EFAIL));
+  // FIPS 203 decapsulation-key check: a secret key whose embedded H(ek) is wrong fails closed.
+  const corrupt = k.secretKey.slice();
+  corrupt[1152 + 1184] ^= 1;
+  call('mlkem768_dec', ['#32', e.cipherText, corrupt], expectRc(EFAIL));
+  call('mlkem768_dec', ['#32', e.cipherText, new Uint8Array(2400)], expectRc(EFAIL));
+}
+
 // Empty messages, with the NULL a binding passes for an empty JS array.
 {
   const nonce = rand(24);
@@ -253,6 +295,18 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
     ['pow_sha256', ['#8', 'NULL:4', le32(1)]],
     ['pow_sha256', ['#8', rand(513), le32(1)]],
     ['pow_sha256', ['#8', 'aa', le32(33)]],
+    ['mlkem768_keypair', ['#1183', '#2400']],
+    ['mlkem768_keypair', ['#1184', '#2399']],
+    ['mlkem768_seed_keypair', ['#1184', '#2400', rand(63)]],
+    ['mlkem768_seed_keypair', ['#1184', '#2400', 'NULL:64']],
+    ['mlkem768_enc', ['#1087', '#32', rand(1184)]],
+    ['mlkem768_enc', ['#1088', '#31', rand(1184)]],
+    ['mlkem768_enc', ['#1088', '#32', rand(1183)]],
+    ['mlkem768_enc', ['#1088', '#32', 'NULL:1184']],
+    ['mlkem768_dec', ['#31', rand(1088), rand(2400)]],
+    ['mlkem768_dec', ['#32', rand(1087), rand(2400)]],
+    ['mlkem768_dec', ['#32', rand(1088), rand(2399)]],
+    ['mlkem768_dec', ['#32', 'NULL:1088', rand(2400)]],
   ];
   for (const [op, args] of bad) call(op, args, expectRc(EBADLEN));
   call('memcmp', ['NULL', 'NULL'], expectRc(EVERIFY));
