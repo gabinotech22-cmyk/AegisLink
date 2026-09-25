@@ -1,5 +1,6 @@
 // Exposes the aegis_sodium C core to Swift (ios/AegisSodiumModule.swift: `import AegisSodiumC`).
 module AegisSodiumC {
   header "aegis_sodium.h"
+  header "aegis_vault.h"
   export *
 }

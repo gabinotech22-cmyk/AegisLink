@@ -9,6 +9,8 @@
 #include <stdint.h>
 
 #include "aegis_sodium.h"
+#include "aegis_vault.h"
+#include <string.h>
 
 typedef struct {
   uint8_t *p;
@@ -185,4 +187,115 @@ FN(pbkdf2Sha256)(JNIEnv *env, jclass cls, jobject out, jobject pwd, jobject salt
   SPANS(3, out, pwd, salt)
   if (iterations < 0) return AEGIS_EBADLEN;
   return aegis_pbkdf2_sha256(S(0), S(1), S(2), (uint32_t) iterations);
+}
+
+/* ── Key vault (F-1b) ────────────────────────────────────────────────────
+ * Handles cross the boundary as 4-byte little-endian arrays (Android is
+ * little-endian), in both directions, like every other output buffer. */
+
+static int in_handle(const span_t *sp, uint32_t *h) {
+  if (sp->p == NULL || sp->len != 4) return -1;
+  memcpy(h, sp->p, 4);
+  return 0;
+}
+
+#define HANDLE_OUT(i) (s[i].len == 4 && s[i].p ? (uint32_t *) (void *) s[i].p : NULL)
+
+FN(vaultUnlock)(JNIEnv *env, jclass cls, jobject slot, jobject kek) {
+  (void) cls;
+  SPANS(2, slot, kek)
+  return aegis_vault_unlock(S(0), S(1));
+}
+
+FN(vaultLock)(JNIEnv *env, jclass cls, jobject slot) {
+  (void) cls;
+  SPANS(1, slot)
+  return aegis_vault_lock(S(0));
+}
+
+FN(vaultLockAll)(JNIEnv *env, jclass cls) {
+  (void) env;
+  (void) cls;
+  return aegis_vault_lock_all();
+}
+
+FN(vaultGenerate)(JNIEnv *env, jclass cls, jobject handle, jobject blob, jobject pub, jobject slot, jint type) {
+  (void) cls;
+  SPANS(4, handle, blob, pub, slot)
+  return aegis_vault_generate(HANDLE_OUT(0), S(1), S(2), S(3), (int) type);
+}
+
+FN(vaultImport)(JNIEnv *env, jclass cls, jobject handle, jobject blob, jobject pub, jobject slot, jint type,
+                jobject raw) {
+  (void) cls;
+  SPANS(5, handle, blob, pub, slot, raw)
+  return aegis_vault_import(HANDLE_OUT(0), S(1), S(2), S(3), (int) type, S(4));
+}
+
+FN(vaultLoad)(JNIEnv *env, jclass cls, jobject handle, jobject type, jobject pub, jobject slot, jobject blob) {
+  (void) cls;
+  SPANS(5, handle, type, pub, slot, blob)
+  return aegis_vault_load(HANDLE_OUT(0), (int *) (void *) HANDLE_OUT(1), S(2), S(3), S(4));
+}
+
+FN(vaultDeriveEd25519)(JNIEnv *env, jclass cls, jobject handle, jobject blob, jobject pub, jobject xhandle) {
+  uint32_t xh;
+  (void) cls;
+  SPANS(4, handle, blob, pub, xhandle)
+  if (in_handle(&s[3], &xh) != 0) return AEGIS_EBADLEN;
+  return aegis_vault_derive_ed25519(HANDLE_OUT(0), S(1), S(2), xh);
+}
+
+FN(vaultRelease)(JNIEnv *env, jclass cls, jobject handle) {
+  uint32_t h;
+  (void) cls;
+  SPANS(1, handle)
+  if (in_handle(&s[0], &h) != 0) return AEGIS_EBADLEN;
+  return aegis_vault_release(h);
+}
+
+FN(vaultSign)(JNIEnv *env, jclass cls, jobject handle, jobject sig, jobject m) {
+  uint32_t h;
+  (void) cls;
+  SPANS(3, handle, sig, m)
+  if (in_handle(&s[0], &h) != 0) return AEGIS_EBADLEN;
+  return aegis_vault_sign(h, S(1), S(2));
+}
+
+FN(vaultScalarmult)(JNIEnv *env, jclass cls, jobject handle, jobject q, jobject p) {
+  uint32_t h;
+  (void) cls;
+  SPANS(3, handle, q, p)
+  if (in_handle(&s[0], &h) != 0) return AEGIS_EBADLEN;
+  return aegis_vault_scalarmult(h, S(1), S(2));
+}
+
+FN(vaultBox)(JNIEnv *env, jclass cls, jobject handle, jobject c, jobject m, jobject n, jobject pk) {
+  uint32_t h;
+  (void) cls;
+  SPANS(5, handle, c, m, n, pk)
+  if (in_handle(&s[0], &h) != 0) return AEGIS_EBADLEN;
+  return aegis_vault_box(h, S(1), S(2), S(3), S(4));
+}
+
+FN(vaultBoxOpen)(JNIEnv *env, jclass cls, jobject handle, jobject m, jobject c, jobject n, jobject pk) {
+  uint32_t h;
+  (void) cls;
+  SPANS(5, handle, m, c, n, pk)
+  if (in_handle(&s[0], &h) != 0) return AEGIS_EBADLEN;
+  return aegis_vault_box_open(h, S(1), S(2), S(3), S(4));
+}
+
+FN(vaultMlkem768Dec)(JNIEnv *env, jclass cls, jobject handle, jobject ss, jobject ct) {
+  uint32_t h;
+  (void) cls;
+  SPANS(3, handle, ss, ct)
+  if (in_handle(&s[0], &h) != 0) return AEGIS_EBADLEN;
+  return aegis_vault_mlkem768_dec(h, S(1), S(2));
+}
+
+FN(vaultLiveKeys)(JNIEnv *env, jclass cls) {
+  (void) env;
+  (void) cls;
+  return (jint) aegis_vault_live_keys();
 }

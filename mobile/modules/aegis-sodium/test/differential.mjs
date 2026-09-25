@@ -236,6 +236,103 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
   call('mlkem768_dec', ['#32', e.cipherText, new Uint8Array(2400)], expectRc(EFAIL));
 }
 
+// ── Key vault (F-1b): operations by handle give the bytes of the raw-key operation. ──
+{
+  const enc = new TextEncoder();
+  const ENOKEY = -3;
+  const blobLen = (slot, keyLen) => 28 + 16 + 1 + slot.length + keyLen;
+  const slot = enc.encode('self');
+  const kek = rand(32);
+  call('vault_unlock', [slot, kek], expectRc(OK));
+  call('vault_unlock', [slot, kek], expectRc(OK)); // idempotent
+  call('vault_unlock', [slot, rand(32)], expectRc(EFAIL)); // another KEK for an unlocked slot
+
+  // Identity as the app derives it: X25519 secret, Ed25519 from the same 32 bytes as seed.
+  const xsk = rand(32);
+  const xpk = nacl.scalarMult.base(xsk);
+  const ed = nacl.sign.keyPair.fromSeed(xsk);
+  const peer = nacl.box.keyPair();
+  const msg = rand(100);
+  const nonce = rand(24);
+  call('vault_import', ['#4=hx', `#${blobLen(slot, 32)}=bx`, '#32', slot, le32(1), xsk], (rc, [, , pub]) =>
+    rc === OK && eq(pub, xpk) ? null : 'import: wrong public key');
+  call('vault_scalarmult', ['$hx', '#32', peer.publicKey], expectBytes(nacl.scalarMult(xsk, peer.publicKey)));
+  call('vault_derive_ed25519', ['#4=he', `#${blobLen(slot, 64)}=be`, '#32', '$hx'], (rc, [, , pub]) =>
+    rc === OK && eq(pub, ed.publicKey) ? null : 'derive: wrong Ed25519 public key');
+  call('vault_sign', ['$he', '#64', msg], expectBytes(nacl.sign.detached(msg, ed.secretKey)));
+  call('vault_box', ['$hx', `#${msg.length + 16}`, msg, nonce, peer.publicKey], expectBytes(nacl.box(msg, nonce, peer.publicKey, xsk)));
+  const boxed = nacl.box(msg, nonce, xpk, peer.secretKey);
+  call('vault_box_open', ['$hx', `#${msg.length}`, boxed, nonce, peer.publicKey], expectBytes(msg));
+  call('vault_scalarmult', ['$he', '#32', peer.publicKey], expectRc(ENOKEY)); // an Ed25519 handle is not an X25519 key
+
+  // A blob reloads into a new handle that does the same thing.
+  call('vault_load', ['#4=hx2', '#4', '#32', slot, '$bx'], (rc, [, type, pub]) =>
+    rc === OK && type[0] === 1 && eq(pub, xpk) ? null : 'load: wrong type or public key');
+  call('vault_scalarmult', ['$hx2', '#32', peer.publicKey], expectBytes(nacl.scalarMult(xsk, peer.publicKey)));
+  call('vault_load', ['#4=he2', '#4', '#32', slot, '$be'], (rc, [, type, pub]) =>
+    rc === OK && type[0] === 2 && eq(pub, ed.publicKey) ? null : 'load ed25519');
+  call('vault_sign', ['$he2', '#64', msg], expectBytes(nacl.sign.detached(msg, ed.secretKey)));
+
+  // ML-KEM-768 decapsulation by handle (keys made the way the app made them).
+  const mk = ml_kem768.keygen();
+  const enc1 = ml_kem768.encapsulate(mk.publicKey);
+  call('vault_import', ['#4=hm', `#${blobLen(slot, 2400)}`, '#1184', slot, le32(3), mk.secretKey], (rc, [, , pub]) =>
+    rc === OK && eq(pub, mk.publicKey) ? null : 'mlkem import');
+  call('vault_mlkem768_dec', ['$hm', '#32', enc1.cipherText], expectBytes(enc1.sharedSecret));
+  const badMk = mk.secretKey.slice();
+  badMk[1152 + 1184] ^= 1;
+  call('vault_import', ['#4', `#${blobLen(slot, 2400)}`, '#1184', slot, le32(3), badMk], expectRc(EFAIL)); // FIPS 203 hash check
+  const badEd = ed.secretKey.slice();
+  badEd[40] ^= 1;
+  call('vault_import', ['#4', `#${blobLen(slot, 64)}`, '#32', slot, le32(2), badEd], expectRc(EFAIL)); // pub half must match seed
+
+  // A secret generated inside never leaves: check it by DH symmetry with a peer.
+  call('vault_generate', ['#4=hg', `#${blobLen(slot, 32)}`, '#32=pg', slot, le32(1)], expectRc(OK));
+  call('vault_generate', ['#4=hs', `#${blobLen(slot, 32)}`, 'NULL', slot, le32(4)], expectRc(OK)); // symmetric secret: no public key
+  call('vault_generate', ['#4', `#${blobLen(slot, 64)}`, '#32', slot, le32(2)], expectRc(OK));
+  call('vault_generate', ['#4', `#${blobLen(slot, 2400)}`, '#1184', slot, le32(3)], expectRc(OK));
+
+  // Isolation and tamper resistance.
+  const other = enc.encode('selg'); // same length as 'self', same KEK: only the slot inside the box differs
+  call('vault_unlock', [other, kek], expectRc(OK));
+  call('vault_load', ['#4', '#4', '#32', other, '$bx'], expectRc(EVERIFY));
+  call('vault_load', ['#4', '#4', '#32', enc.encode('nope'), '$bx'], expectRc(ENOKEY)); // locked (never unlocked) profile
+  const work = enc.encode('work');
+  call('vault_unlock', [work, rand(32)], expectRc(OK));
+  call('vault_load', ['#4', '#4', '#32', work, '$bx'], expectRc(EVERIFY)); // another profile's KEK
+  call('vault_lock', [other], expectRc(OK));
+  call('vault_lock', [work], expectRc(OK));
+
+  // Release and lock kill handles; a locked profile loads nothing.
+  call('vault_release', ['$hx2'], expectRc(OK));
+  call('vault_scalarmult', ['$hx2', '#32', peer.publicKey], expectRc(ENOKEY));
+  call('vault_release', ['$hx2'], expectRc(ENOKEY));
+  call('vault_lock', [slot], expectRc(OK));
+  call('vault_sign', ['$he', '#64', msg], expectRc(ENOKEY));
+  call('vault_mlkem768_dec', ['$hm', '#32', enc1.cipherText], expectRc(ENOKEY));
+  call('vault_load', ['#4', '#4', '#32', slot, '$bx'], expectRc(ENOKEY));
+  call('vault_live', [], expectRc(0)); // nothing left alive
+
+  // After unlocking again with the same KEK, the stored blob loads (persistence across launches).
+  call('vault_unlock', [slot, kek], expectRc(OK));
+  call('vault_load', ['#4=hx3', '#4', '#32', slot, '$bx'], expectRc(OK));
+  call('vault_box_open', ['$hx3', `#${msg.length}`, boxed, nonce, peer.publicKey], expectBytes(msg));
+  call('vault_lock_all', [], expectRc(OK));
+  call('vault_live', [], expectRc(0));
+
+  // Length validation.
+  call('vault_unlock', [slot, rand(31)], expectRc(EBADLEN));
+  call('vault_unlock', ['NULL', kek], expectRc(EBADLEN));
+  call('vault_unlock', [rand(65), kek], expectRc(EBADLEN));
+  call('vault_unlock', [slot, kek], expectRc(OK));
+  call('vault_import', ['#4', `#${blobLen(slot, 32)}`, '#32', slot, le32(1), rand(31)], expectRc(EBADLEN));
+  call('vault_import', ['#4', `#${blobLen(slot, 32) - 1}`, '#32', slot, le32(1), rand(32)], expectRc(EBADLEN));
+  call('vault_import', ['#4', `#${blobLen(slot, 32)}`, '#31', slot, le32(1), rand(32)], expectRc(EBADLEN));
+  call('vault_import', ['#4', `#${blobLen(slot, 32)}`, '#32', slot, le32(9), rand(32)], expectRc(EBADLEN));
+  call('vault_load', ['#4', '#4', '#32', slot, rand(20)], expectRc(EBADLEN));
+  call('vault_lock_all', [], expectRc(OK));
+}
+
 // Empty messages, with the NULL a binding passes for an empty JS array.
 {
   const nonce = rand(24);

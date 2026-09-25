@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('aegis', {
     callAsync: (op: string, args: unknown[]): Promise<unknown> =>
       ipcRenderer.invoke('sodium:call-async', op, args)
   },
+  // ── F-1b: key vault in the main process (ipc/vault.ts). Private keys never
+  // come back over this channel: only handles, public keys and blobs.
+  vault: {
+    call: (op: string, args: unknown[]): unknown => ipcRenderer.sendSync('vault:call', op, args)
+  },
   secureStorage: {
     set: (key: string, value: string): Promise<void> =>
       ipcRenderer.invoke('secureStorage:set', key, value),

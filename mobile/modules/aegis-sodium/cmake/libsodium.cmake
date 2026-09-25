@@ -60,7 +60,7 @@ if(AEGIS_BIG_ENDIAN)
   message(FATAL_ERROR "aegis-sodium: big-endian targets are not supported")
 endif()
 
-add_library(aegis_sodium_core STATIC "${AEGIS_SODIUM_ROOT}/cpp/aegis_sodium.c")
+add_library(aegis_sodium_core STATIC "${AEGIS_SODIUM_ROOT}/cpp/aegis_sodium.c" "${AEGIS_SODIUM_ROOT}/cpp/aegis_vault.c")
 set_target_properties(aegis_sodium_core PROPERTIES POSITION_INDEPENDENT_CODE ON C_STANDARD 99)
 target_include_directories(aegis_sodium_core PUBLIC "${AEGIS_SODIUM_ROOT}/cpp")
 target_compile_options(aegis_sodium_core PRIVATE -Wall -Wextra -Werror)

@@ -40,6 +40,20 @@ internal object AegisSodiumNative {
   @JvmStatic external fun argon2id(out: ByteBuffer?, pwd: ByteBuffer?, salt: ByteBuffer?, t: Int, m: Int): Int
   @JvmStatic external fun powSha256(nonce: ByteBuffer?, challenge: ByteBuffer?, difficulty: Int): Int
   @JvmStatic external fun pbkdf2Sha256(out: ByteBuffer?, pwd: ByteBuffer?, salt: ByteBuffer?, iterations: Int): Int
+  @JvmStatic external fun vaultUnlock(slot: ByteBuffer?, kek: ByteBuffer?): Int
+  @JvmStatic external fun vaultLock(slot: ByteBuffer?): Int
+  @JvmStatic external fun vaultLockAll(): Int
+  @JvmStatic external fun vaultGenerate(handle: ByteBuffer?, blob: ByteBuffer?, pub: ByteBuffer?, slot: ByteBuffer?, type: Int): Int
+  @JvmStatic external fun vaultImport(handle: ByteBuffer?, blob: ByteBuffer?, pub: ByteBuffer?, slot: ByteBuffer?, type: Int, raw: ByteBuffer?): Int
+  @JvmStatic external fun vaultLoad(handle: ByteBuffer?, type: ByteBuffer?, pub: ByteBuffer?, slot: ByteBuffer?, blob: ByteBuffer?): Int
+  @JvmStatic external fun vaultDeriveEd25519(handle: ByteBuffer?, blob: ByteBuffer?, pub: ByteBuffer?, xhandle: ByteBuffer?): Int
+  @JvmStatic external fun vaultRelease(handle: ByteBuffer?): Int
+  @JvmStatic external fun vaultSign(handle: ByteBuffer?, sig: ByteBuffer?, m: ByteBuffer?): Int
+  @JvmStatic external fun vaultScalarmult(handle: ByteBuffer?, q: ByteBuffer?, p: ByteBuffer?): Int
+  @JvmStatic external fun vaultBox(handle: ByteBuffer?, c: ByteBuffer?, m: ByteBuffer?, n: ByteBuffer?, pk: ByteBuffer?): Int
+  @JvmStatic external fun vaultBoxOpen(handle: ByteBuffer?, m: ByteBuffer?, c: ByteBuffer?, n: ByteBuffer?, pk: ByteBuffer?): Int
+  @JvmStatic external fun vaultMlkem768Dec(handle: ByteBuffer?, ss: ByteBuffer?, ct: ByteBuffer?): Int
+  @JvmStatic external fun vaultLiveKeys(): Int
   @JvmStatic external fun mlkem768Keypair(pk: ByteBuffer?, sk: ByteBuffer?): Int
   @JvmStatic external fun mlkem768SeedKeypair(pk: ByteBuffer?, sk: ByteBuffer?, seed: ByteBuffer?): Int
   @JvmStatic external fun mlkem768Enc(ct: ByteBuffer?, ss: ByteBuffer?, pk: ByteBuffer?): Int
@@ -82,6 +96,14 @@ private fun argon2id(pwd: ByteArray, salt: ByteArray, t: Int, mKib: Int, outLen:
     wipe(out)
     wipe(p)
   }
+}
+
+/** Slot ids are short ASCII names ('self', 'slot_1'): they key the KEK preference. */
+private fun checkSlot(slot: String): ByteArray {
+  if (!Regex("^[A-Za-z0-9_.-]{1,64}$").matches(slot)) {
+    throw CodedException("ERR_AEGIS_VAULT", "bad vault slot name", null)
+  }
+  return slot.toByteArray(Charsets.US_ASCII)
 }
 
 /**
@@ -175,6 +197,60 @@ class AegisSodiumModule : Module() {
     AsyncFunction("argon2id") { pwd: ByteArray, salt: ByteArray, t: Int, mKib: Int, outLen: Int ->
       argon2id(pwd, salt, t, mKib, outLen)
     }
+    // ── Key vault (F-1b) ───────────────────────────────────────────────────
+    // Unlock: the KEK goes from the Keystore straight into the C vault; JS
+    // only learns that the profile is usable. Keystore work runs off the JS thread.
+    AsyncFunction("vaultUnlock") { slot: String ->
+      val slotBytes = checkSlot(slot)
+      val context = appContext.reactContext ?: throw CodedException("ERR_AEGIS_VAULT", "no context", null)
+      val kek = VaultKek.kek(context, slot)
+      val k = direct(kek)
+      kek.fill(0)
+      try {
+        val rc = AegisSodiumNative.vaultUnlock(direct(slotBytes), k)
+        if (rc != 0) throw CodedException("ERR_AEGIS_VAULT", "aegis_vault_unlock failed: $rc", null)
+      } finally {
+        wipe(k)
+      }
+    }
+    // Panic / profile wipe: destroy the profile's keys and forget its KEK.
+    AsyncFunction("vaultDestroyProfile") { slot: String ->
+      val slotBytes = checkSlot(slot)
+      val context = appContext.reactContext ?: throw CodedException("ERR_AEGIS_VAULT", "no context", null)
+      AegisSodiumNative.vaultLock(direct(slotBytes))
+      VaultKek.destroy(context, slot)
+    }
+    Function("vaultLock") { slot: String -> AegisSodiumNative.vaultLock(direct(checkSlot(slot))) }
+    Function("vaultLockAll") { AegisSodiumNative.vaultLockAll() }
+    Function("vaultGenerate") { handle: Uint8Array, blob: Uint8Array, pub: Uint8Array, slot: Uint8Array, type: Int ->
+      AegisSodiumNative.vaultGenerate(b(handle), b(blob), b(pub), b(slot), type)
+    }
+    Function("vaultImport") { handle: Uint8Array, blob: Uint8Array, pub: Uint8Array, slot: Uint8Array, type: Int, raw: Uint8Array ->
+      AegisSodiumNative.vaultImport(b(handle), b(blob), b(pub), b(slot), type, b(raw))
+    }
+    Function("vaultLoad") { handle: Uint8Array, type: Uint8Array, pub: Uint8Array, slot: Uint8Array, blob: Uint8Array ->
+      AegisSodiumNative.vaultLoad(b(handle), b(type), b(pub), b(slot), b(blob))
+    }
+    Function("vaultDeriveEd25519") { handle: Uint8Array, blob: Uint8Array, pub: Uint8Array, xhandle: Uint8Array ->
+      AegisSodiumNative.vaultDeriveEd25519(b(handle), b(blob), b(pub), b(xhandle))
+    }
+    Function("vaultRelease") { handle: Uint8Array -> AegisSodiumNative.vaultRelease(b(handle)) }
+    Function("vaultSign") { handle: Uint8Array, sig: Uint8Array, m: Uint8Array ->
+      AegisSodiumNative.vaultSign(b(handle), b(sig), b(m))
+    }
+    Function("vaultScalarmult") { handle: Uint8Array, q: Uint8Array, p: Uint8Array ->
+      AegisSodiumNative.vaultScalarmult(b(handle), b(q), b(p))
+    }
+    Function("vaultBox") { handle: Uint8Array, c: Uint8Array, m: Uint8Array, n: Uint8Array, pk: Uint8Array ->
+      AegisSodiumNative.vaultBox(b(handle), b(c), b(m), b(n), b(pk))
+    }
+    Function("vaultBoxOpen") { handle: Uint8Array, m: Uint8Array, c: Uint8Array, n: Uint8Array, pk: Uint8Array ->
+      AegisSodiumNative.vaultBoxOpen(b(handle), b(m), b(c), b(n), b(pk))
+    }
+    Function("vaultMlkem768Dec") { handle: Uint8Array, ss: Uint8Array, ct: Uint8Array ->
+      AegisSodiumNative.vaultMlkem768Dec(b(handle), b(ss), b(ct))
+    }
+    Function("vaultLiveKeys") { AegisSodiumNative.vaultLiveKeys() }
     AsyncFunction("pbkdf2Sha256") { pwd: ByteArray, salt: ByteArray, iterations: Int, outLen: Int ->
       pbkdf2Sha256(pwd, salt, iterations, outLen)
     }

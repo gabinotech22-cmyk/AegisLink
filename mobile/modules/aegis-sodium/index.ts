@@ -21,6 +21,8 @@ export const AEGIS_OK = 0;
 export const AEGIS_EVERIFY = 1;
 export const AEGIS_EBADLEN = -1;
 export const AEGIS_EFAIL = -2;
+/** Vault: profile locked, or handle unknown / released / of another type. */
+export const AEGIS_ENOKEY = -3;
 
 type B = Uint8Array;
 
@@ -42,6 +44,24 @@ export interface AegisSodiumNative {
   signVerifyDetached(sig: B, m: B, pk: B): number;
   hmacsha256(out: B, m: B, k: B): number;
   hkdfSha256(out: B, ikm: B, salt: B, info: B): number;
+  // ── Key vault (F-1b, cpp/aegis_vault.h). Handles are 4-byte arrays. ──
+  /** Load (or create) the profile's KEK from the Keychain/Keystore into the C vault. */
+  vaultUnlock(slot: string): Promise<void>;
+  /** Destroy the profile's keys and forget its KEK (its blobs become unreadable). */
+  vaultDestroyProfile(slot: string): Promise<void>;
+  vaultLock(slot: string): number;
+  vaultLockAll(): number;
+  vaultGenerate(handle: B, blob: B, pub: B, slot: B, type: number): number;
+  vaultImport(handle: B, blob: B, pub: B, slot: B, type: number, raw: B): number;
+  vaultLoad(handle: B, type: B, pub: B, slot: B, blob: B): number;
+  vaultDeriveEd25519(handle: B, blob: B, pub: B, xhandle: B): number;
+  vaultRelease(handle: B): number;
+  vaultSign(handle: B, sig: B, m: B): number;
+  vaultScalarmult(handle: B, q: B, p: B): number;
+  vaultBox(handle: B, c: B, m: B, n: B, pk: B): number;
+  vaultBoxOpen(handle: B, m: B, c: B, n: B, pk: B): number;
+  vaultMlkem768Dec(handle: B, ss: B, ct: B): number;
+  vaultLiveKeys(): number;
   mlkem768Keypair(pk: B, sk: B): number;
   mlkem768SeedKeypair(pk: B, sk: B, seed: B): number;
   mlkem768Enc(ct: B, ss: B, pk: B): number;
