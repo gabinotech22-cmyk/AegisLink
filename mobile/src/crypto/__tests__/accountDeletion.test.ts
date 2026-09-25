@@ -12,7 +12,7 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
-import { utf8ToBytes } from '@noble/hashes/utils';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
 
 jest.mock('../../config', () => ({ SERVER_URL: 'https://relay.test' }));
 

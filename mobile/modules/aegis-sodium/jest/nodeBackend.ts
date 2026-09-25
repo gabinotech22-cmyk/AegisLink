@@ -19,8 +19,8 @@
  * The shipped C core itself is tested against TweetNaCl/@noble by
  * `../test/differential.mjs` (CI job `aegis-sodium-native`).
  */
-import { createHmac } from 'node:crypto';
-import { argon2id } from '@noble/hashes/argon2';
+import { createHmac, pbkdf2Sync } from 'node:crypto';
+import { argon2id } from '@noble/hashes/argon2.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import sodium from 'sodium-native';
 import type { AegisSodiumNative } from '../index';
@@ -185,14 +185,21 @@ const nodeBackend: AegisSodiumNative = {
     // A 16-byte salt (the app-lock PIN's per-install salt) goes to real libsodium:
     // crypto_pwhash with Argon2id v1.3, one lane, is the same function as the C
     // core's argon2id_hash_raw. Other salt lengths (backup: 32 B, duress: a domain
-    // string) fall back to @noble, sync: argon2idAsync would pick up the app's
-    // setTimeout-yield patch (crypto/nobleNextTickPatch) and crawl.
+    // string) fall back to @noble's argon2id.
     if (salt.length === sodium.crypto_pwhash_SALTBYTES) {
       const out = new Uint8Array(outLen);
       sodium.crypto_pwhash(out, pwd, salt, t, mKib * 1024, sodium.crypto_pwhash_ALG_ARGON2ID13);
       return Array.from(out);
     }
     return Array.from(argon2id(pwd, salt, { t, m: mKib, p: 1, dkLen: outLen }));
+  },
+  pbkdf2Sha256: async (pwd, salt, iterations, outLen) => {
+    const ok =
+      isBytes(pwd) && isBytes(salt) && pwd.length <= 65536 && salt.length <= 1024 &&
+      Number.isInteger(outLen) && outLen >= 1 && outLen <= 64 &&
+      Number.isInteger(iterations) && iterations >= 1 && iterations <= 10_000_000;
+    if (!ok) throw new Error(`aegis_pbkdf2_sha256 failed: ${EBADLEN}`);
+    return Array.from(pbkdf2Sync(pwd, salt, iterations, outLen, 'sha256'));
   },
   mlkem768Keypair: (pk, sk) => {
     if (!len([pk, MLKEM_PK], [sk, MLKEM_SK])) return EBADLEN;

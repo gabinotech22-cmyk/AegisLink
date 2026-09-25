@@ -6,8 +6,8 @@
 import nacl from 'tweetnacl';
 import naclUtil from 'tweetnacl-util';
 const { encodeBase64 } = naclUtil;
-import { sha256 } from '@noble/hashes/sha256';
-import { utf8ToBytes } from '@noble/hashes/utils';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 
 const BASE = process.env.RELAY || 'https://aegislink.duckdns.org';

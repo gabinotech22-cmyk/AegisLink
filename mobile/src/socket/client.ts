@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 import { logger } from '../utils/logger';
-import { nacl, ml_kem768 } from '../crypto/sodium';
+import { nacl, ml_kem768, sha256 } from '../crypto/sodium';
 import { secretB64Equals } from '../crypto/secretEquals';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
@@ -123,7 +123,6 @@ const spkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}spkSecret.${key
  * [RDIAG] instrumentation once the fresh-session desync is confirmed fixed.
  */
 function rootKeyFp(rk: Uint8Array): string {
-  const { sha256 } = require('@noble/hashes/sha256') as typeof import('@noble/hashes/sha256');
   const digest = sha256(rk);
   let hex = '';
   for (let i = 0; i < 4; i++) hex += digest[i].toString(16).padStart(2, '0');

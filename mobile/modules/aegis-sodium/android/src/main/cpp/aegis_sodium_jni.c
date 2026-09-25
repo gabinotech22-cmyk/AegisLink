@@ -179,3 +179,10 @@ FN(mlkem768Dec)(JNIEnv *env, jclass cls, jobject ss, jobject ct, jobject sk) {
   SPANS(3, ss, ct, sk)
   return aegis_mlkem768_dec(S(0), S(1), S(2));
 }
+
+FN(pbkdf2Sha256)(JNIEnv *env, jclass cls, jobject out, jobject pwd, jobject salt, jint iterations) {
+  (void) cls;
+  SPANS(3, out, pwd, salt)
+  if (iterations < 0) return AEGIS_EBADLEN;
+  return aegis_pbkdf2_sha256(S(0), S(1), S(2), (uint32_t) iterations);
+}

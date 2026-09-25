@@ -134,8 +134,14 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 
 ## Hito 3 — Terminar el endurecimiento cripto 🟠
 
-- [ ] **H3 — unificar `@noble/hashes`** mobile v1 ↔ desktop v2 (hoy mitigado por KAT cross-platform;
-      falta unificar mayor + verificación Metro on-device).
+- [x] **H3 — unificar `@noble/hashes`** ✅ (2026-09-25): mobile pasa de 1.8 a 2.4.0, la misma versión
+      que desktop (imports con `.js`; `sha256` → `sha2.js`). El parche `nobleNextTickPatch` (que
+      hacía ceder el hilo al PBKDF2 de backups v1/v2) no funciona con el ESM de v2, así que ese
+      PBKDF2 pasa al núcleo C (`aegis_pbkdf2_sha256`, asíncrono, mismos bytes que @noble) y el
+      parche se borra. Pruebas: `noble-kat.test.ts` (mismos vectores en las dos plataformas),
+      `differential.mjs` (PBKDF2 C vs @noble y RFC 7914), `sodium-facade.test.ts`,
+      `backup.test.ts` (backups v1/v2/v3). La verificación Metro en dispositivo la hace el E2E de
+      Android del CI (compila el APK con Metro).
 - [x] **F-1 — núcleo cripto nativo** ✅ (en mobile, efectivo desde el primer build nativo que lo incluya): portar hot-path (X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC)
       a libsodium, conservando la capa TS. Cierra el gap constant-time a través del JIT. Sustitución de
       implementación, **no** cambio de protocolo (bytes idénticos, sin forzar actualización; sí exige

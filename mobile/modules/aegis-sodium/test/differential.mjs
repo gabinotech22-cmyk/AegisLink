@@ -20,10 +20,11 @@ import { randomBytes } from 'node:crypto';
 
 const require = createRequire(import.meta.url);
 const nacl = require('tweetnacl');
-const { hmac } = require('@noble/hashes/hmac');
-const { hkdf } = require('@noble/hashes/hkdf');
-const { sha256 } = require('@noble/hashes/sha2');
-const { argon2id } = require('@noble/hashes/argon2');
+const { hmac } = require('@noble/hashes/hmac.js');
+const { hkdf } = require('@noble/hashes/hkdf.js');
+const { sha256 } = require('@noble/hashes/sha2.js');
+const { argon2id } = require('@noble/hashes/argon2.js');
+const { pbkdf2 } = require('@noble/hashes/pbkdf2.js');
 const { ml_kem768 } = await import('@noble/post-quantum/ml-kem.js');
 
 const OK = 0;
@@ -155,6 +156,20 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
   // Empty password, with the NULL a binding passes for an empty JS array.
   call('argon2id', ['#32', 'NULL', enc.encode('somesalt'), le32(1), le32(64)],
     expectBytes(argon2id(new Uint8Array(0), enc.encode('somesalt'), { t: 1, m: 64, p: 1, dkLen: 32 })));
+}
+
+// PBKDF2-HMAC-SHA256 against @noble (which wrote the legacy v1/v2 backups) and
+// RFC 7914 §11; including the app's own parameters (v1: 100k, 32-byte key).
+{
+  const enc = new TextEncoder();
+  const p2 = (outLen, pwd, salt, c) =>
+    call('pbkdf2_sha256', [`#${outLen}`, pwd, salt, le32(c)], expectBytes(pbkdf2(sha256, pwd, salt, { c, dkLen: outLen })));
+  for (let i = 0; i < Math.min(ITER, 40); i++) p2(1 + randInt(63), rand(randInt(100)), rand(randInt(64)), 1 + randInt(2000));
+  p2(32, rand(200), rand(32), 3); // password longer than the HMAC block (hashed first)
+  p2(32, enc.encode('correct horse battery staple'), rand(32), 100_000); // backup v1
+  call('pbkdf2_sha256', ['#64', enc.encode('passwd'), enc.encode('salt'), le32(1)],
+    expectBytes(unhex('55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783')));
+  call('pbkdf2_sha256', ['#32', 'NULL', 'NULL', le32(2)], expectBytes(pbkdf2(sha256, new Uint8Array(0), new Uint8Array(0), { c: 2, dkLen: 32 })));
 }
 
 // Registration proof-of-work: the C miner returns the SAME nonce as the
@@ -295,6 +310,12 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
     ['pow_sha256', ['#8', 'NULL:4', le32(1)]],
     ['pow_sha256', ['#8', rand(513), le32(1)]],
     ['pow_sha256', ['#8', 'aa', le32(33)]],
+    ['pbkdf2_sha256', ['#0', 'aa', 'bb', le32(1)]],
+    ['pbkdf2_sha256', ['#65', 'aa', 'bb', le32(1)]],
+    ['pbkdf2_sha256', ['#32', 'aa', 'bb', le32(0)]],
+    ['pbkdf2_sha256', ['#32', 'aa', 'bb', le32(10_000_001)]],
+    ['pbkdf2_sha256', ['#32', 'NULL:4', 'bb', le32(1)]],
+    ['pbkdf2_sha256', ['#32', 'aa', rand(1025), le32(1)]],
     ['mlkem768_keypair', ['#1183', '#2400']],
     ['mlkem768_keypair', ['#1184', '#2399']],
     ['mlkem768_seed_keypair', ['#1184', '#2400', rand(63)]],

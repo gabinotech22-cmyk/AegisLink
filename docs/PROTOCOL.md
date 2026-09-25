@@ -138,17 +138,19 @@ native libsodium everywhere:
 - **Still in JavaScript:** ML-KEM-768 on desktop (`@noble/post-quantum`):
   `sodium-native` has no ML-KEM, and Electron's BoringSSL can generate
   ML-KEM keys but cannot import a peer's public key, so it cannot encapsulate;
-  it moves with F-1b, when desktop keys leave the renderer. Also PBKDF2, only to
-  restore legacy v1/v2 backups; and Argon2id on desktop (V8 with JIT runs it
-  sub-second, and `sodium-native` exposes only the 16-byte-salt
-  `crypto_pwhash`).
+  it moves with F-1b, when desktop keys leave the renderer. Also on desktop:
+  PBKDF2, only to restore legacy v1/v2 backups, and Argon2id (V8 with JIT runs
+  it sub-second, and `sodium-native` exposes only the 16-byte-salt
+  `crypto_pwhash`). On mobile, legacy PBKDF2-HMAC-SHA256 runs in the C core
+  too (`pbkdf2Sha256`, async), byte-identical to the @noble derivation that
+  wrote those backups; both clients use `@noble/hashes` 2.x (audit item H3).
 
 We state this per platform, with the manifests to check (`server/package.json`,
 `desktop/package.json`, `mobile/package.json`), because a blanket "constant-time
 native bindings" claim would be trivially falsifiable, and a falsifiable security
 claim is worse than an honest limitation. The rest of this section describes the
 JavaScript path the clients ran before F-1, and what still runs in JS
-(desktop ML-KEM-768, legacy PBKDF2, desktop Argon2id, the protocol composition itself).
+(desktop ML-KEM-768, desktop legacy PBKDF2, desktop Argon2id, the protocol composition itself).
 
 **Constant-time posture (what is in our favor).**
 
@@ -772,8 +774,8 @@ with a key derived from a user passphrase the relay never sees:
 > embedded, so they cannot be tuned without a version bump (changing them would
 > break decryption of existing v3 backups). On mobile the derivation runs on
 > native libsodium off the JS thread (§2.1), well under a second; in JavaScript
-> on Hermes it took minutes. Legacy v1/v2 (PBKDF2) restores still run in JS and
-> take tens of seconds.
+> on Hermes it took minutes. Legacy v1/v2 (PBKDF2) restores run natively on
+> mobile as well.
 
 **App-lock PIN (mobile, `mobile/src/lock/pin.ts`).** The PIN only gates the UI
 (no key derives from it). It is stored as `a4:` = Argon2id(PIN, 16-byte
@@ -880,8 +882,8 @@ on desktop, `lock/__tests__/coldLock.test.ts` on both).
   (§3.1).
 - **Runtime-level timing side-channels in the remaining JS crypto.** The NaCl,
   HMAC and HKDF primitives run on native libsodium on every platform (§2.1,
-  F-1), and so does Argon2id on mobile. What still runs in JavaScript —
-  ML-KEM-768, legacy PBKDF2 and desktop Argon2id — is constant-time at the
+  F-1), and so do ML-KEM-768, Argon2id and legacy PBKDF2 on mobile. What still
+  runs in JavaScript — on desktop, ML-KEM-768, legacy PBKDF2 and Argon2id — is constant-time at the
   source level only, not through the JIT and GC. Practical exploitation requires a local co-resident oracle, which
   already implies endpoint compromise. Key material still passes through the JS
   heap (follow-up F-1b, §10).
