@@ -230,3 +230,35 @@ describe('native return codes are never ignored', () => {
     });
   });
 });
+
+describe('powSha256 (native, async)', () => {
+  it('fails closed on a native rejection or a malformed nonce', async () => {
+    const results = [
+      () => Promise.reject(new Error('aegis_pow_sha256 failed: -2')),
+      () => Promise.resolve('0000000'),
+      () => Promise.resolve('0000000G'),
+      () => Promise.resolve(undefined),
+    ];
+    for (const result of results) {
+      let facade!: typeof import('../sodium');
+      jest.isolateModules(() => {
+        jest.doMock('../../../modules/aegis-sodium', () => {
+          const real = jest.requireActual('../../../modules/aegis-sodium/jest/nodeBackend');
+          return { __esModule: true, ...real, default: { ...real.default, powSha256: result } };
+        });
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        facade = require('../sodium') as typeof import('../sodium');
+      });
+      await expect(facade.powSha256(new Uint8Array([0x61]), 1)).rejects.toThrow(/pow_?sha256 failed/i);
+    }
+  });
+
+  it('rejects out-of-range parameters before calling native code', async () => {
+    const { powSha256 } = await import('../sodium');
+    await expect(powSha256(new Uint8Array(0), 1)).rejects.toThrow(/challenge/);
+    await expect(powSha256(new Uint8Array(513), 1)).rejects.toThrow(/challenge/);
+    await expect(powSha256(new Uint8Array(1), 33)).rejects.toThrow(/difficulty/);
+    await expect(powSha256(new Uint8Array(1), -1)).rejects.toThrow(/difficulty/);
+    await expect(powSha256(new Uint8Array(1), 1.5)).rejects.toThrow(/difficulty/);
+  });
+});

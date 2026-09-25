@@ -43,6 +43,10 @@ Hechos verificados:
   [#287](https://github.com/gabinotech22-cmyk/AegisLink/pull/287) (ya en `main`) hace que el
   banner muestre el error crudo; cuando la build 16 esté en TestFlight, pedir captura al dueño.
 
+> **Estado 2026-09:** el fix 2 (reusar buffer) se hizo en su día y el fix 1 (SHA-256 nativo) ya
+> está hecho: el minero corre en C dentro del módulo nativo (ver `docs/ROADMAP.md`, Hito 3,
+> "Prueba de trabajo (PoW) nativa en mobile"). Lo de abajo es el estado en que se escribió.
+
 Fixes candidatos (decidir en la sesión que lo tome):
 1. SHA-256 nativo para el minero (p.ej. `expo-crypto digestStringAsync` en lotes, o precomputar
    el estado del hash) — orden de magnitud más rápido, sin cambiar el protocolo.

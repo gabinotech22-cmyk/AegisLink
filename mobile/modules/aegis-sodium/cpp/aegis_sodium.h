@@ -84,6 +84,20 @@ int aegis_hkdf_sha256(uint8_t *out, size_t outlen, const uint8_t *ikm, size_t ik
 int aegis_argon2id(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdlen, const uint8_t *salt,
                    size_t saltlen, uint32_t t_cost, uint32_t m_kib);
 
+/*
+ * Registration proof-of-work (the relay's server/src/pow/challenge.ts): find
+ * the first 8-hex-digit nonce "00000000", "00000001", ... "ffffffff" such that
+ * SHA-256(nonce || challenge) starts with `difficulty` zero bits, and write its
+ * 8 ASCII characters to `nonce`. Same order, and so the same nonce, as the
+ * JavaScript miner it replaces. AEGIS_EFAIL if none of the 2^32 nonces works
+ * (never at the relay's difficulties, 12-18). Seconds of work on Hermes, a
+ * fraction of a second here: the bindings run it off the JS thread.
+ */
+#define AEGIS_POW_NONCE_LEN 8
+#define AEGIS_POW_CHALLENGE_MAX 512
+#define AEGIS_POW_DIFFICULTY_MAX 32
+int aegis_pow_sha256(uint8_t *nonce, size_t noncelen, const uint8_t *challenge, size_t challen, uint32_t difficulty);
+
 #ifdef __cplusplus
 }
 #endif
