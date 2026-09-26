@@ -7,7 +7,8 @@
  *
  * Same contract and blob format as the mobile C vault
  * (`mobile/modules/aegis-sodium/cpp/aegis_vault.c`):
- *   blob = "AV" | 1 | type | nonce(24) | secretbox_KEK(slotlen | slot | key)
+ *   blob v2 = "AV" | 2 | type | nonce(24) | secretbox_KEK(type | slotlen | slot | key)
+ * (type and slot authenticated inside the box).
  * The per-profile KEK comes from a `KekStore` (Electron safeStorage in
  * production, `./kekStore.ts`); this module has no Electron import so tests
  * drive it directly.
@@ -16,12 +17,18 @@ import sodium from 'sodium-native';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { sha3_256 } from '@noble/hashes/sha3.js';
 
-export type VaultKeyType = 'x25519' | 'ed25519' | 'mlkem768' | 'secret32';
+/** 'x25519prekey' (SPK / OPK): every X25519 operation, its own type for the export policy. */
+export type VaultKeyType = 'x25519' | 'ed25519' | 'mlkem768' | 'secret32' | 'x25519prekey';
 
-export const TYPE_ID: Record<VaultKeyType, number> = { x25519: 1, ed25519: 2, mlkem768: 3, secret32: 4 };
-const TYPE_NAME: Record<number, VaultKeyType> = { 1: 'x25519', 2: 'ed25519', 3: 'mlkem768', 4: 'secret32' };
-const KEY_LEN: Record<VaultKeyType, number> = { x25519: 32, ed25519: 64, mlkem768: 2400, secret32: 32 };
-const PUB_LEN: Record<VaultKeyType, number> = { x25519: 32, ed25519: 32, mlkem768: 1184, secret32: 0 };
+export const TYPE_ID: Record<VaultKeyType, number> = { x25519: 1, ed25519: 2, mlkem768: 3, secret32: 4, x25519prekey: 5 };
+const TYPE_NAME: Record<number, VaultKeyType> = { 1: 'x25519', 2: 'ed25519', 3: 'mlkem768', 4: 'secret32', 5: 'x25519prekey' };
+const KEY_LEN: Record<VaultKeyType, number> = { x25519: 32, ed25519: 64, mlkem768: 2400, secret32: 32, x25519prekey: 32 };
+const PUB_LEN: Record<VaultKeyType, number> = { x25519: 32, ed25519: 32, mlkem768: 1184, secret32: 0, x25519prekey: 32 };
+const VERSION = 2;
+
+/** A key of type `have` serves an operation wanting `want` (an X25519 prekey does every X25519 operation). */
+const typeOk = (have: VaultKeyType, want: VaultKeyType): boolean =>
+  have === want || (want === 'x25519' && have === 'x25519prekey');
 const HEADER = 28;
 const MLKEM_EK = 1152;
 const SLOT_RE = /^[A-Za-z0-9_.-]{1,64}$/;
@@ -70,7 +77,7 @@ function secure(bytes: Uint8Array): Buffer {
 
 function publicOf(type: VaultKeyType, secret: Uint8Array): Uint8Array {
   const pub = new Uint8Array(PUB_LEN[type]);
-  if (type === 'x25519') sodium.crypto_scalarmult_base(pub, secret);
+  if (type === 'x25519' || type === 'x25519prekey') sodium.crypto_scalarmult_base(pub, secret);
   else if (type === 'ed25519') pub.set(secret.subarray(32, 64));
   else if (type === 'mlkem768') pub.set(secret.subarray(MLKEM_EK, MLKEM_EK + 1184));
   return pub;
@@ -164,12 +171,12 @@ export class KeyVault {
 
   load(slot: string, blob: Uint8Array): VaultKeyInfo {
     checkSlot(slot);
-    if (!(blob instanceof Uint8Array) || blob.length < HEADER + 17 || blob[0] !== 0x41 || blob[1] !== 0x56 || blob[2] !== 1) {
+    if (!(blob instanceof Uint8Array) || blob.length < HEADER + 18 || blob[0] !== 0x41 || blob[1] !== 0x56 || blob[2] !== VERSION) {
       throw new VaultError('REJECTED', 'blob rejected (another profile, or tampered)');
     }
     const type = TYPE_NAME[blob[3]];
     const slotBytes = Buffer.from(slot, 'ascii');
-    if (!type || blob.length !== HEADER + 16 + 1 + slotBytes.length + KEY_LEN[type]) {
+    if (!type || blob.length !== HEADER + 16 + 2 + slotBytes.length + KEY_LEN[type]) {
       throw new VaultError('REJECTED', 'blob rejected (another profile, or tampered)');
     }
     const kek = this.keks.get(slot);
@@ -179,10 +186,17 @@ export class KeyVault {
       const ok = this.withKek(kek, () =>
         sodium.crypto_secretbox_open_easy(plain, blob.subarray(HEADER), blob.subarray(4, HEADER), kek),
       );
-      if (!ok || plain[0] !== slotBytes.length || !Buffer.from(plain.subarray(1, 1 + slotBytes.length)).equals(slotBytes)) {
+      // Type and slot inside the box must match the header and this profile:
+      // a relabelled header (identity key posing as a prekey) never loads.
+      if (
+        !ok ||
+        plain[0] !== TYPE_ID[type] ||
+        plain[1] !== slotBytes.length ||
+        !Buffer.from(plain.subarray(2, 2 + slotBytes.length)).equals(slotBytes)
+      ) {
         throw new VaultError('REJECTED', 'blob rejected (another profile, or tampered)');
       }
-      const secret = plain.subarray(1 + slotBytes.length);
+      const secret = plain.subarray(2 + slotBytes.length);
       const publicKey = publicOf(type, secret);
       return { handle: this.store_(slot, type, secret), type, publicKey };
     } finally {
@@ -191,7 +205,8 @@ export class KeyVault {
   }
 
   deriveEd25519(xHandle: number): VaultKeyInfo & { blob: Uint8Array } {
-    const x = this.entry(xHandle, 'x25519');
+    // The identity derivation takes the identity key only (exact type).
+    const x = this.entry(xHandle, 'x25519', true);
     const sk = new Uint8Array(64);
     try {
       this.use(xHandle, 'x25519', (seed) => sodium.crypto_sign_seed_keypair(new Uint8Array(32), sk, seed));
@@ -223,7 +238,8 @@ export class KeyVault {
    */
   exportSecret(handle: number, type: VaultKeyType): Uint8Array {
     const out = new Uint8Array(KEY_LEN[type] ?? 0);
-    this.use(handle, type, (secret) => out.set(secret));
+    // Exact type: the IPC layer's export policy keys off the declared type.
+    this.use(handle, type, (secret) => out.set(secret), true);
     return out;
   }
 
@@ -293,13 +309,14 @@ export class KeyVault {
     const kek = this.keks.get(slot);
     if (!kek) throw new VaultError('NOKEY', 'profile locked');
     const s = Buffer.from(slot, 'ascii');
-    const plain = sodium.sodium_malloc(1 + s.length + secret.length);
+    const plain = sodium.sodium_malloc(2 + s.length + secret.length);
     try {
-      plain[0] = s.length;
-      plain.set(s, 1);
-      plain.set(secret, 1 + s.length);
+      plain[0] = TYPE_ID[type];
+      plain[1] = s.length;
+      plain.set(s, 2);
+      plain.set(secret, 2 + s.length);
       const blob = new Uint8Array(HEADER + 16 + plain.length);
-      blob.set([0x41, 0x56, 1, TYPE_ID[type]]);
+      blob.set([0x41, 0x56, VERSION, TYPE_ID[type]]);
       sodium.randombytes_buf(blob.subarray(4, HEADER));
       this.withKek(kek, () => sodium.crypto_secretbox_easy(blob.subarray(HEADER), plain, blob.subarray(4, HEADER), kek));
       return blob;
@@ -315,14 +332,14 @@ export class KeyVault {
     return handle;
   }
 
-  private entry(handle: number, type: VaultKeyType): Entry {
+  private entry(handle: number, type: VaultKeyType, exact = false): Entry {
     const e = typeof handle === 'number' ? this.keys.get(handle) : undefined;
-    if (!e || e.type !== type) throw new VaultError('NOKEY', 'key not available (locked, released or of another type)');
+    if (!e || !(exact ? e.type === type : typeOk(e.type, type))) throw new VaultError('NOKEY', 'key not available (locked, released or of another type)');
     return e;
   }
 
-  private use(handle: number, type: VaultKeyType, fn: (secret: Buffer) => void): void {
-    const e = this.entry(handle, type);
+  private use(handle: number, type: VaultKeyType, fn: (secret: Buffer) => void, exact = false): void {
+    const e = this.entry(handle, type, exact);
     sodium.sodium_mprotect_readonly(e.secret);
     try {
       fn(e.secret);

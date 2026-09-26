@@ -251,10 +251,10 @@ function containsAnySecret(
   opks: OneTimePreKeyPublic[],
 ): boolean {
   const spkAny = spk as unknown as Record<string, unknown>;
-  if ('secretKey' in spkAny || 'secretKeyB64' in spkAny) return true;
+  if ('secretKey' in spkAny || 'secretKeyB64' in spkAny || 'secretStored' in spkAny) return true;
   for (const opk of opks) {
     const o = opk as unknown as Record<string, unknown>;
-    if ('secretKey' in o || 'secretKeyB64' in o) return true;
+    if ('secretKey' in o || 'secretKeyB64' in o || 'secretStored' in o) return true;
   }
   return false;
 }

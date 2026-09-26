@@ -33,6 +33,7 @@ import {
 import { type Identity } from '../../identity';
 import { hkdfSHA256 } from '../kdf';
 import { identityFromRaw } from '../../__tests__/helpers/rawIdentity';
+import { pk, pkOrNull } from '../../__tests__/helpers/rawIdentity';
 
 // ML-KEM-768 wire sizes (FIPS 203, Table 3). The ratchet module keeps these
 // private, so we pin the literals here exactly like the mobile twin does.
@@ -69,10 +70,10 @@ function newSession(): Session {
 
   const x = performX3DH(alice, bundle);
   const opk = bundle.oneTimePreKey;
-  const opkSecret = opk ? (bobPreKeys.opkSecrets.get(opk.keyId) ?? null) : null;
+  const opkSecret = opk ? (pkOrNull(bobPreKeys.opkSecrets.get(opk.keyId))) : null;
   const bobRoot = performX3DHReceiver(
     bob,
-    bobPreKeys.signedPreKey.secretKey,
+    pk(bobPreKeys.signedPreKey.secretStored),
     opkSecret,
     alice.publicKey,
     decodeBase64(x.myEphemeralPublicKeyB64),
@@ -82,7 +83,7 @@ function newSession(): Session {
   const aliceState = initRatchet(x.rootKey, bobSpkPub, true);
   const bobState = initRatchet(bobRoot, new Uint8Array(), false, {
     publicKey: bobSpkPub,
-    secretKey: bobPreKeys.signedPreKey.secretKey,
+    secretKey: pk(bobPreKeys.signedPreKey.secretStored),
   });
   return { aliceState, bobState };
 }
@@ -113,13 +114,13 @@ function newHybridSession(): Session {
   expect(x.version).toBe(2); // sanity: PQXDH negotiated
   const bobRoot = performX3DHReceiver(
     bob,
-    bobPreKeys.signedPreKey.secretKey,
+    pk(bobPreKeys.signedPreKey.secretStored),
     null,
     alice.publicKey,
     decodeBase64(x.myEphemeralPublicKeyB64),
     {
       cipherText: decodeBase64(x.pqCiphertextB64!),
-      pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+      pqSpkSecret: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768'),
     },
   );
 
@@ -131,8 +132,8 @@ function newHybridSession(): Session {
     bobRoot,
     new Uint8Array(),
     false,
-    { publicKey: bobSpkPub, secretKey: bobPreKeys.signedPreKey.secretKey },
-    { publicKey: bobPqPub, secretKey: bobPreKeys.pqSignedPreKey.secretKey },
+    { publicKey: bobSpkPub, secretKey: pk(bobPreKeys.signedPreKey.secretStored) },
+    { publicKey: bobPqPub, secretKey: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768') },
     null,
   );
   return { aliceState, bobState };

@@ -1,6 +1,6 @@
 # F-1b — Bóveda de claves nativa (claves privadas fuera de la memoria de JavaScript)
 
-> Estado: **DISEÑO v1** (2026-09-25); fases 1a y 1b implementadas (§5 describe lo que se hizo de
+> Estado: **DISEÑO v1** (2026-09-25); fases 1a, 1b y 2 implementadas (§5 describe lo que se hizo de
 > verdad en las exportaciones). Alcance aprobado por el dueño: **fases 1, 2 y 3**, mobile y
 > desktop; UnifiedPush va después. Estado de cada fase: `docs/ROADMAP.md` → Hito 3 (fuente única).
 > Reglas de oro: #1 (fail-closed), #5 (paridad), #8 (constant-time), #9 (zeroizar), #11 (un test por
@@ -41,9 +41,16 @@ Session (libsession-util en C++), SimpleX (Haskell nativo; el cliente UI no ve c
     cifra la KEK, guardada en los ficheros privados de la app.
   - Escritorio: `safeStorage` de Electron (DPAPI / Keychain / libsecret) en el proceso main.
   Una KEK por perfil (slot), para mantener el aislamiento de perfiles.
-- **Blobs:** toda clave que sale de la bóveda sale cifrada (`crypto_secretbox` con la KEK, nonce
-  aleatorio, con el tipo de clave y el slot como datos asociados vía un prefijo autenticado). JS
-  guarda el blob donde hoy guarda la clave cruda, así que el almacenamiento no cambia de sitio.
+- **Blobs (v2):** toda clave que sale de la bóveda sale cifrada:
+  `"AV" | 2 | tipo | nonce(24) | secretbox_KEK(tipo | slotlen | slot | clave)`. El tipo y el slot van
+  **dentro** de la caja y se comprueban al cargar, así que un blob de otro perfil no carga y una
+  cabecera con el tipo cambiado tampoco (la v1 solo llevaba el slot dentro; no llegó a ninguna
+  versión publicada y ya no se acepta). JS guarda el blob, como `"vault1:" + base64`, donde antes
+  guardaba la clave cruda, así que el almacenamiento no cambia de sitio.
+- **Tipos:** `x25519` (identidad), `ed25519`, `mlkem768`, `secret32` y `x25519prekey` (SPK/OPK):
+  hace todo lo que hace `x25519`, pero es un tipo propio para que el escritorio pueda exportar la SPK
+  a los dispositivos vinculados del usuario sin pedir permiso, sin que eso sirva para sacar la clave
+  de identidad (el tipo está autenticado en el blob, así que no se puede disfrazar una de otra).
 - **Handles:** al cargar un blob, la bóveda lo descifra en memoria protegida (`sodium_malloc` +
   `sodium_mprotect_noaccess` entre usos) y devuelve un número. Las operaciones reciben el handle:
   `sign`, `scalarmult` (X25519), `box.open`/`box` con la clave de identidad, `mlkem.dec`, KDFs del
@@ -58,8 +65,9 @@ Session (libsession-util en C++), SimpleX (Haskell nativo; el cliente UI no ve c
   operaciones siguen siendo síncronas por JSI (como hoy), y las lentas, asíncronas.
 - **Escritorio:** la bóveda vive en el proceso main (`sodium-native` con `sodium_malloc`, KEK en
   `safeStorage`); el renderer pide operaciones por el IPC que ya existe (`window.aegis.sodium`),
-  ahora con handles en vez de claves. ML-KEM-768 (fase 2) corre en main: allí no llega el XSS del
-  renderer, que es la amenaza del escritorio.
+  ahora con handles en vez de claves. ML-KEM-768 (fase 2) corre en main (`main/crypto/sodium/
+  mlkem.ts`): allí no llega el XSS del renderer, que es la amenaza del escritorio. Sigue siendo
+  `@noble/post-quantum` (JavaScript), porque `sodium-native` 5.1 no expone el ML-KEM de libsodium.
 
 ## 3. Fases (cada una en PRs pequeñas, móvil y escritorio en la misma rama por fase)
 
@@ -69,6 +77,15 @@ Session (libsession-util en C++), SimpleX (Haskell nativo; el cliente UI no ve c
 | **1b** | Claves de identidad (X25519 + Ed25519) | `crypto/identity.ts`, `db/core.ts`, `store/identity.ts`, `store/profiles.ts`, firmas (prekeys, auth, TURN, grupos, canales, mailbox), sealed sender, llamadas |
 | **2** | Prekeys: SPK, OPKs y PQSPK (ML-KEM); en escritorio también ML-KEM nativo en main | `crypto/signal/x3dh.ts`, `crypto/registration.ts`, `db/prekeys.ts` |
 | **3** | Estado del Double Ratchet (root, chain y message keys, DHs, PQs) | `crypto/signal/ratchet.ts`, `socket/ratchetSerde.ts`, sesiones en SQLite |
+
+**Fase 2 (hecha):** las prekeys se generan dentro de la bóveda (SPK/OPK como `x25519prekey`, PQSPK
+como `mlkem768`) y se guardan como blobs en los mismos sitios que antes; las guardadas en crudo se
+migran al reutilizarlas (`ensureDevicePreKeys`) o al abrirlas. El X3DH receptor las usa por handle.
+El Double Ratchet del receptor arranca con su SPK/PQSPK como par inicial: el ratchet acepta ese
+handle (`crypto/sodium/secretRef.ts`), lo consume en el primer paso y nunca lo persiste
+(`ratchetSerde` se niega). La SPK que va a los dispositivos vinculados del usuario (vincular y
+sincronización tras rotar) es una exportación explícita (§5). Las claves por turno del ratchet
+siguen en JS hasta la fase 3.
 
 **Fase 3** en móvil: el ratchet se porta al C core; el estado se persiste como blob sellado con la
 KEK (JS guarda el blob en SQLite, como hoy guarda el JSON). En escritorio el ratchet corre en el

@@ -137,12 +137,12 @@ short version:
 - **Some crypto still runs in JavaScript, and keys pass through JS memory.**
   The core primitives (X25519, XSalsa20-Poly1305, Ed25519, HMAC/HKDF, RNG) run
   on native libsodium on every platform, and so do ML-KEM-768, Argon2id (PIN,
-  backup) and legacy-backup PBKDF2 on mobile. On desktop, ML-KEM-768,
-  legacy-backup PBKDF2 and Argon2id are still constant-time JS (`@noble`),
-  whose guarantee is source-level, not verified
-  through the JIT+GC. Identity keys live only in a native key vault (F-1b phase
-  1b); prekeys and ratchet keys are still handed to native code from JS memory
-  (F-1b phases 2–3). Practical exploitation would require an already-compromised
+  backup) and legacy-backup PBKDF2 on mobile. On desktop, ML-KEM-768 (in the
+  main process), legacy-backup PBKDF2 and Argon2id are still constant-time JS
+  (`@noble`), whose guarantee is source-level, not verified
+  through the JIT+GC. Identity keys and prekeys live only in a native key vault
+  (F-1b phases 1b and 2); the per-turn ratchet keys are still handed to native
+  code from JS memory (F-1b phase 3). Practical exploitation would require an already-compromised
   device ([docs/PROTOCOL.md §2.1](docs/PROTOCOL.md)).
 - **iOS push goes through Apple.** On iPhone the only way to wake a closed app
   is Apple's APNs: the relay sends a generic wake-up with no content or sender,

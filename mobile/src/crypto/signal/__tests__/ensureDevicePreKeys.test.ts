@@ -63,6 +63,9 @@ import {
 } from '../x3dh';
 import type { Identity } from '../../identity';
 import { identityFromRaw } from '../../__tests__/helpers/rawIdentity';
+import { pk, pkOrNull } from '../../__tests__/helpers/rawIdentity';
+import { ml_kem768 } from '../../sodium';
+import { vault } from '../../sodium/vault';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
@@ -86,13 +89,14 @@ describe('ensureDevicePreKeys — single source of truth', () => {
     const set = await ensureDevicePreKeys(me);
 
     // SPK public derived from the persisted secret.
-    const persistedSpkSec = decodeBase64(mockDbSpk.get(set.signedPreKey.keyId)!);
-    expect(encodeBase64(nacl.scalarMult.base(persistedSpkSec))).toBe(set.signedPreKey.publicKeyB64);
+    // (F-1b: the persisted secret is a vault blob; the vault derives its public half.)
+    const persistedSpk = pk(mockDbSpk.get(set.signedPreKey.keyId)!);
+    expect(mockDbSpk.get(set.signedPreKey.keyId)!.startsWith('vault1:')).toBe(true);
+    expect(encodeBase64(persistedSpk.publicKey)).toBe(set.signedPreKey.publicKeyB64);
 
     // Every published OPK public matches its persisted secret.
     for (const opk of set.oneTimePreKeys) {
-      const sec = decodeBase64(mockDbOpk.get(opk.keyId)!);
-      expect(encodeBase64(nacl.scalarMult.base(sec))).toBe(opk.publicKeyB64);
+      expect(encodeBase64(pk(mockDbOpk.get(opk.keyId)!).publicKey)).toBe(opk.publicKeyB64);
     }
 
     // The SPK signature verifies under the identity signing key.
@@ -141,8 +145,10 @@ describe('ensureDevicePreKeys — single source of truth', () => {
 
     expect(decodeBase64(set.pqSignedPreKey.publicKeyB64).length).toBe(1184);
     // The persisted PQSPK secret is the 2400-byte ML-KEM-768 secret key.
+    // (F-1b: persisted as a vault blob of the 2400-byte ML-KEM-768 secret key.)
     const persisted = mockDbPqSpk.get(set.pqSignedPreKey.keyId)!;
-    expect(decodeBase64(persisted).length).toBe(2400);
+    expect(pk(persisted, 'mlkem768').type).toBe('mlkem768');
+    expect(encodeBase64(pk(persisted, 'mlkem768').publicKey)).toBe(set.pqSignedPreKey.publicKeyB64);
     // The published PQSPK signature verifies under the identity signing key.
     expect(
       nacl.sign.detached.verify(
@@ -158,10 +164,10 @@ describe('ensureDevicePreKeys — single source of truth', () => {
     // Simulate a legacy install: an SPK + OPK already persisted, but NO PQSPK.
     const { generatePreKeys } = require('../x3dh') as typeof import('../x3dh');
     const legacy = generatePreKeys(me, 1, 2, 1, 1);
-    mockDbSpk.set(legacy.signedPreKey.keyId, encodeBase64(legacy.signedPreKey.secretKey));
+    mockDbSpk.set(legacy.signedPreKey.keyId, legacy.signedPreKey.secretStored);
     mockDbSpkKeyId = legacy.signedPreKey.keyId;
     for (const [keyId, secret] of legacy.opkSecrets) {
-      mockDbOpk.set(keyId, encodeBase64(secret));
+      mockDbOpk.set(keyId, secret);
     }
     // PQSPK store intentionally empty (pre-PQXDH).
     expect(mockDbPqSpk.size).toBe(0);
@@ -171,6 +177,32 @@ describe('ensureDevicePreKeys — single source of truth', () => {
     expect(set.signedPreKey.keyId).toBe(legacy.signedPreKey.keyId);
     expect(mockDbPqSpk.size).toBe(1);
     expect(decodeBase64(set.pqSignedPreKey.publicKeyB64).length).toBe(1184);
+  });
+
+  it('F-1b: migrates raw pre-vault prekey secrets to vault blobs, same public keys', async () => {
+    const me = buildIdentity();
+    // A pre-F-1b install: raw base64 secrets in the DB.
+    const spk = nacl.box.keyPair();
+    const opk = nacl.box.keyPair();
+    const pq = ml_kem768.keygen();
+    mockDbSpk.set(1, encodeBase64(spk.secretKey));
+    mockDbSpkKeyId = 1;
+    mockDbOpk.set(7, encodeBase64(opk.secretKey));
+    mockDbPqSpk.set(1, encodeBase64(pq.secretKey));
+    mockDbPqSpkKeyId = 1;
+
+    const set = await ensureDevicePreKeys(me);
+    // Same keys published (nothing regenerated) …
+    expect(set.signedPreKey.publicKeyB64).toBe(encodeBase64(spk.publicKey));
+    expect(set.oneTimePreKeys).toEqual([{ keyId: 7, publicKeyB64: encodeBase64(opk.publicKey) }]);
+    expect(set.pqSignedPreKey.publicKeyB64).toBe(encodeBase64(pq.publicKey));
+    // … and the raw rows were replaced by vault blobs that open to the same keys.
+    for (const stored of [mockDbSpk.get(1)!, mockDbOpk.get(7)!]) expect(stored.startsWith('vault1:')).toBe(true);
+    expect(mockDbPqSpk.get(1)!.startsWith('vault1:')).toBe(true);
+    const peer = nacl.box.keyPair();
+    expect(vault.scalarMult(pk(mockDbSpk.get(1)!), peer.publicKey)).toEqual(nacl.scalarMult(spk.secretKey, peer.publicKey));
+    const enc = ml_kem768.encapsulate(pq.publicKey);
+    expect(vault.mlkemDecapsulate(pk(mockDbPqSpk.get(1)!, 'mlkem768'), enc.cipherText)).toEqual(enc.sharedSecret);
   });
 });
 
@@ -197,8 +229,8 @@ describe('ensureDevicePreKeys — end-to-end X3DH convergence (rkFp equal)', () 
     const aliceX3DH = performX3DH(alice, bundle);
 
     // Bob loads his SECRETS from the DB (the receiver path), NOT from `bobSet`.
-    const bobSpkSecret = decodeBase64(mockDbSpk.get(bobSet.signedPreKey.keyId)!);
-    const bobOpkSecret = decodeBase64(mockDbOpk.get(opkPub.keyId)!);
+    const bobSpkSecret = pk(mockDbSpk.get(bobSet.signedPreKey.keyId)!);
+    const bobOpkSecret = pk(mockDbOpk.get(opkPub.keyId)!);
 
     const bobRoot = performX3DHReceiver(
       bob,

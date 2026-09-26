@@ -14,7 +14,7 @@
 
 import { logger } from '../utils/logger';
 import { io, type Socket } from 'socket.io-client';
-import { nacl, sha256 } from '../crypto/sodium';
+import { nacl, sha256, ml_kem768 } from '../crypto/sodium';
 import { vault, type VaultKey } from '../crypto/sodium/vault';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import { SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, FEDERATION } from '../config';
@@ -55,11 +55,11 @@ import {
   performX3DH,
   performX3DHReceiver,
   generatePreKeys,
+  exportSpkForLinkedDevice,
   shouldUsePqReceiver,
   type PreKeyBundle,
   type PqSignedPreKeyPublic,
 } from '../crypto/signal/x3dh';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import {
   initRatchet,
@@ -119,6 +119,23 @@ const spkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}spkSecret.${key
 // PQXDH (v2): ML-KEM-768 signed PQ prekey secret (2400 bytes) per keyId, plus a
 // durable counter of the current keyId. Mirrors mobile's DB-backed PQSPK store,
 // but desktop persists in the encrypted keystore (window.aegis.secureStorage).
+/**
+ * Handles for the persisted SPK / PQSPK secrets (F-1b phase 2): opened from the
+ * vault blob on first use and kept, since the same SPK serves many inbound
+ * handshakes. Bounded by the prekeys this device keeps; a vault lock (panic,
+ * profile wipe) makes them stale and they are reopened. A raw pre-F-1b secret
+ * is imported here (mirrors mobile/src/socket/client.ts).
+ */
+const prekeyHandles = new Map<string, { key: VaultKey; epoch: number }>();
+function prekeyHandle(slot: string, type: 'x25519prekey' | 'mlkem768', stored: string): VaultKey {
+  const id = `${slot}|${type}|${stored}`;
+  const cached = prekeyHandles.get(id);
+  if (cached && cached.epoch === vault.epoch()) return cached.key;
+  const key = vault.openStored(slot, type, stored).key;
+  prekeyHandles.set(id, { key, epoch: vault.epoch() });
+  return key;
+}
+
 const pqSpkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}pqSpkSecret.${keyId}`;
 const SECURE_PQSPK_KEYID_KEY = () => `aegis.${getSlotPrefix()}pqSpk.keyId`;
 
@@ -140,8 +157,8 @@ export async function saveSpkSecret(keyId: number, b64: string): Promise<void> {
  * as the SPK: never advertise a PQ prekey whose 2400-byte secret we cannot
  * recover (that would silently break every inbound v2 handshake). Returns true
  * only if the secret reads back intact and the keyId counter was advanced. */
-export async function persistPqSpkSecret(keyId: number, secret: Uint8Array): Promise<boolean> {
-  const b64 = encodeBase64(secret);
+export async function persistPqSpkSecret(keyId: number, stored: string): Promise<boolean> {
+  const b64 = stored;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       await SecureStore.setItemAsync(pqSpkSecretKey(keyId), b64);
@@ -233,8 +250,6 @@ interface WireChallenge {
 let socket: Socket | null = null;
 let connected = false;
 let authenticated = false;
-let opkSecretsCache: Map<number, Uint8Array> = new Map();
-let mySpkSecretCache: Uint8Array | null = null;
 
 // ── Auth watchdog (mirrors mobile/src/socket/client.ts) ─────────────────────
 // The server disconnects unauthenticated sockets after AUTH_TIMEOUT_MS=5s
@@ -596,14 +611,15 @@ export function isConnected(): boolean {
  */
 export async function persistPrekeySecrets(
   preKeys: {
-    signedPreKey: { keyId: number; secretKey: Uint8Array };
-    opkSecrets: Map<number, Uint8Array>;
+    /** Persisted forms: key-vault blobs (F-1b phase 2). */
+    signedPreKey: { keyId: number; secretStored: string };
+    opkSecrets: Map<number, string>;
   },
   prevSpkKeyId: number | null = null,
 ): Promise<boolean> {
   try {
     const nextSpkKeyId = preKeys.signedPreKey.keyId;
-    const newSecretB64 = encodeBase64(preKeys.signedPreKey.secretKey);
+    const newSecretB64 = preKeys.signedPreKey.secretStored;
     await SecureStore.setItemAsync(spkSecretKey(nextSpkKeyId), newSecretB64);
     await SecureStore.setItemAsync(SECURE_SPK_SECRET_KEY(), newSecretB64);
     await SecureStore.setItemAsync(SECURE_SPK_KEYID_KEY(), String(nextSpkKeyId));
@@ -638,8 +654,8 @@ export async function persistPrekeySecrets(
       }
     } catch {/* ignore */}
 
-    for (const [keyId, secret] of preKeys.opkSecrets.entries()) {
-      await SecureStore.setItemAsync(opkSecretKey(keyId), encodeBase64(secret));
+    for (const [keyId, stored] of preKeys.opkSecrets.entries()) {
+      await SecureStore.setItemAsync(opkSecretKey(keyId), stored);
     }
     await SecureStore.setItemAsync(
       SECURE_OPK_IDS_KEY(),
@@ -671,8 +687,6 @@ async function uploadPreKeys(identity: Identity) {
   const nextPqSpkKeyId = (prevPqSpkKeyId ?? 0) + 1;
 
   const preKeys = generatePreKeys(identity, 1, 100, nextSpkKeyId, nextPqSpkKeyId);
-  mySpkSecretCache = preKeys.signedPreKey.secretKey;
-  opkSecretsCache = preKeys.opkSecrets;
 
   const persisted = await persistPrekeySecrets(preKeys, prevSpkKeyId);
   if (!persisted) {
@@ -682,7 +696,7 @@ async function uploadPreKeys(identity: Identity) {
   // PQXDH (v2): persist the PQSPK secret with the same readback invariant. On
   // failure we fall back to a v1-safe upload (omit pqSignedPreKey below) rather
   // than advertising a PQ prekey we could not recover.
-  const pqSpkOk = await persistPqSpkSecret(nextPqSpkKeyId, preKeys.pqSignedPreKey.secretKey);
+  const pqSpkOk = await persistPqSpkSecret(nextPqSpkKeyId, preKeys.pqSignedPreKey.secretStored);
   if (pqSpkOk && prevPqSpkKeyId !== null && prevPqSpkKeyId !== nextPqSpkKeyId) {
     try { await SecureStore.deleteItemAsync(pqSpkSecretKey(prevPqSpkKeyId)); } catch {/* best-effort */}
   }
@@ -725,7 +739,7 @@ async function uploadPreKeys(identity: Identity) {
               v: 2,
               from: identity.aegisId,
               selfCopy: true,
-              deviceSync: { type: 'spk', spkId: nextSpkKeyId, spkSecretB64: encodeBase64(mySpkSecretCache!) }
+              deviceSync: { type: 'spk', spkId: nextSpkKeyId, spkSecretB64: exportSpkForLinkedDevice(identity.secretKey.slot, preKeys.signedPreKey.secretStored) }
             };
             const { stripAndPad } = require('../crypto/metadata') as typeof import('../crypto/metadata');
             const innerBytes = stripAndPad(innerPayload);
@@ -1581,17 +1595,18 @@ async function decryptAndAppendLocked(
       if (DEV) logger.warn('[socket] mySpkSecret not found — cannot decrypt');
       return false;
     }
-    const mySpkSecret = decodeBase64(spkSec);
+    const mySpkSecret = prekeyHandle(identity.secretKey.slot, 'x25519prekey', spkSec);
 
     // If Alice committed to an opkId she DID include DH4 — decrypting without
     // it derives a different root key (guaranteed desync). Hard-abort instead
     // of silently mis-deriving, and defer consumption until after success so a
     // redelivered init can retry with the same OPK.
-    let myOpkSecret: Uint8Array | null = null;
+    let myOpkSecret: VaultKey | null = null;
     if (parsed.x3dh.opkId !== null) {
       const opkSecBase64 = await SecureStore.getItemAsync(opkSecretKey(parsed.x3dh.opkId));
       if (opkSecBase64) {
-        myOpkSecret = decodeBase64(opkSecBase64);
+        // One-time key: a handle for this handshake only, released right after X3DH.
+        myOpkSecret = vault.openStored(identity.secretKey.slot, 'x25519prekey', opkSecBase64).key;
         consumeOpkIdAfterDecrypt = parsed.x3dh.opkId;
       } else {
         if (DEV)
@@ -1611,7 +1626,7 @@ async function decryptAndAppendLocked(
     if (weAdvertisedPq && !pqCtB64) {
       void useSecurityDiagnostics.getState().recordPqDowngrade();
     }
-    let pqInputs: { cipherText: Uint8Array; pqSpkSecret: Uint8Array } | null = null;
+    let pqInputs: { cipherText: Uint8Array; pqSpkSecret: VaultKey } | null = null;
     if (pqDecision === 'v2') {
       const pqKeyId = await getActivePqSpkKeyId();
       const pqSecB64 = pqKeyId !== null ? await SecureStore.getItemAsync(pqSpkSecretKey(pqKeyId)) : null;
@@ -1619,25 +1634,30 @@ async function decryptAndAppendLocked(
         if (DEV) logger.warn('[socket] PQSPK secret not found for active keyId — cannot complete v2 handshake');
         return false;
       }
-      pqInputs = { cipherText: decodeBase64(pqCtB64!), pqSpkSecret: decodeBase64(pqSecB64) };
+      pqInputs = { cipherText: decodeBase64(pqCtB64!), pqSpkSecret: prekeyHandle(identity.secretKey.slot, 'mlkem768', pqSecB64) };
     }
 
     const senderPubKey = decodeBase64(contact.publicKeyB64);
-    const rootKey = performX3DHReceiver(
-      identity,
-      mySpkSecret,
-      myOpkSecret,
-      senderPubKey,
-      decodeBase64(parsed.x3dh.aliceEKB64),
-      pqInputs,
-    );
+    let rootKey: Uint8Array;
+    try {
+      rootKey = performX3DHReceiver(
+        identity,
+        mySpkSecret,
+        myOpkSecret,
+        senderPubKey,
+        decodeBase64(parsed.x3dh.aliceEKB64),
+        pqInputs,
+      );
+    } finally {
+      if (myOpkSecret) vault.release(myOpkSecret);
+    }
 
-    const spkPublicKey = nacl.scalarMult.base(mySpkSecret);
+    const spkPublicKey = mySpkSecret.publicKey;
     // Hybrid PQ ratchet (R1) bootstrap: when this handshake negotiated v2,
     // seed our PQSPK keypair as the ratchet's initial PQs (mirrors mySpkSecret
     // for DHs above). pqInputs is only set when pqDecision === 'v2'.
     const initialPQs = pqInputs
-      ? { publicKey: ml_kem768.getPublicKey(pqInputs.pqSpkSecret), secretKey: pqInputs.pqSpkSecret }
+      ? { publicKey: pqInputs.pqSpkSecret.publicKey, secretKey: pqInputs.pqSpkSecret }
       : null;
     ratchetState = initRatchet(rootKey, decodeBase64(parsed.ratchet.ratchetKeyB64), false, {
       publicKey: spkPublicKey,
@@ -2394,7 +2414,11 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
       typeof (deviceSync as { spkSecretB64?: unknown }).spkSecretB64 === 'string'
     ) {
       const spkSync = deviceSync as { spkId: number; spkSecretB64: string };
-      await saveSpkSecret(spkSync.spkId, spkSync.spkSecretB64);
+      // The other device sends the raw SPK (boxed to us); it goes straight into
+      // our vault and is persisted as a blob (F-1b phase 2).
+      const synced = vault.openStored(identity.secretKey.slot, 'x25519prekey', spkSync.spkSecretB64);
+      vault.release(synced.key);
+      await saveSpkSecret(spkSync.spkId, synced.stored);
       if (DEV) logger.debug(`[socket] Synced SPK secret for keyId ${spkSync.spkId} from other device`);
       return;
     }
@@ -2413,25 +2437,30 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
       if (DEV) logger.warn('[socket] self-copy: missing local SPK secret — dropping (multi-device SPK sync not implemented)');
       return;
     }
-    const mySpkSecret = decodeBase64(spkSec);
+    const mySpkSecret = prekeyHandle(identity.secretKey.slot, 'x25519prekey', spkSec);
 
-    let myOpkSecret: Uint8Array | null = null;
+    let myOpkSecret: VaultKey | null = null;
     const x3dhInit = parsed.x3dh as { aliceEKB64: string; spkId: number; opkId: number | null };
     if (x3dhInit.opkId !== null) {
       const opkB64 = await SecureStore.getItemAsync(opkSecretKey(x3dhInit.opkId));
       if (opkB64) {
-        myOpkSecret = decodeBase64(opkB64);
+        myOpkSecret = vault.openStored(identity.secretKey.slot, 'x25519prekey', opkB64).key;
         void SecureStore.deleteItemAsync(opkSecretKey(x3dhInit.opkId));
       }
     }
-    const rootKey = performX3DHReceiver(
-      identity,
-      mySpkSecret,
-      myOpkSecret,
-      identity.publicKey,
-      decodeBase64(x3dhInit.aliceEKB64),
-    );
-    const spkPub = nacl.scalarMult.base(mySpkSecret);
+    let rootKey: Uint8Array;
+    try {
+      rootKey = performX3DHReceiver(
+        identity,
+        mySpkSecret,
+        myOpkSecret,
+        identity.publicKey,
+        decodeBase64(x3dhInit.aliceEKB64),
+      );
+    } finally {
+      if (myOpkSecret) vault.release(myOpkSecret);
+    }
+    const spkPub = mySpkSecret.publicKey;
     const rHeader = parsed.ratchet as { ratchetKeyB64: string };
     ratchet = initRatchet(rootKey, decodeBase64(rHeader.ratchetKeyB64), false, {
       publicKey: spkPub,

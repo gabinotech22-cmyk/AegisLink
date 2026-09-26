@@ -16,6 +16,7 @@ const ALLOWED: Record<string, string> = {
   'crypto/identity.ts': 'defines exportIdentitySecrets',
   'screens/Backup.tsx': 'encrypted backup + recovery phrase',
   'screens/Devices.tsx': 'device link (boxed to the new device)',
+  'crypto/signal/x3dh.ts': 'SPK for the user\'s own linked devices (device link, SPK sync)',
 };
 
 const EXPORT_CALL = /\b(?:exportSecret|exportIdentitySecrets)\s*\(/;

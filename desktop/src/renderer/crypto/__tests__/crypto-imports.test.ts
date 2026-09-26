@@ -8,7 +8,9 @@
  *   - `tweetnacl-util` (base64/utf8 codecs, no key material).
  *   - `@noble/hashes/sha2` in `crypto/backup.ts`: PBKDF2 takes the hash object,
  *     and the password KDFs stay on @noble until the new backup format.
- *   - @noble argon2 / pbkdf2 / utils and @noble/post-quantum (not migrated in F-1).
+ *   - @noble argon2 / pbkdf2 / utils (not migrated in F-1).
+ * ML-KEM-768 (@noble/post-quantum) runs in the MAIN process only (F-1b phase 2):
+ * the renderer reaches it through the facade's `ml_kem768`.
  * Twin guards: `mobile/src/crypto/__tests__/crypto-imports.test.ts`,
  * `server/src/__tests__/crypto-imports.test.ts`.
  */
@@ -26,6 +28,8 @@ const TWEETNACL = /(?:from\s+'tweetnacl'|require\('tweetnacl'\))/;
 const NOBLE_MAC_KDF = /from\s+'@noble\/hashes\/(?:hmac|hkdf)(?:\.js)?'/;
 const NOBLE_HASH = /from\s+'@noble\/hashes\/(?:sha2|sha256|sha512)(?:\.js)?'/;
 const NOBLE_HASH_ALLOWED = [path.join('renderer', 'crypto', 'backup.ts')];
+const NOBLE_PQ = /(?:from\s+|require\(|import\()'@noble\/post-quantum[^']*'/;
+const RENDERER = path.join(SRC_ROOT, 'renderer') + path.sep;
 
 function productionFiles(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -55,6 +59,11 @@ describe('crypto primitives come only from the sodium facades', () => {
 
   it('no direct @noble HMAC/HKDF import outside the facades', () => {
     const offenders = files.filter((p) => !inFacade(p) && NOBLE_MAC_KDF.test(fs.readFileSync(p, 'utf8')));
+    expect(offenders).toEqual([]);
+  });
+
+  it('F-1b: no @noble/post-quantum anywhere in the renderer (ML-KEM runs in main)', () => {
+    const offenders = files.filter((p) => p.startsWith(RENDERER) && NOBLE_PQ.test(fs.readFileSync(p, 'utf8')));
     expect(offenders).toEqual([]);
   });
 

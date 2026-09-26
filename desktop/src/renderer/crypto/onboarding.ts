@@ -55,7 +55,7 @@ export function generateInitialPreKeys(
   };
 
   const secrets: PreKeySecrets = {
-    signedPreKey: { keyId: signedPreKey.keyId, secretKey: signedPreKey.secretKey },
+    signedPreKey: { keyId: signedPreKey.keyId, secretStored: signedPreKey.secretStored },
     opkSecrets,
   };
 

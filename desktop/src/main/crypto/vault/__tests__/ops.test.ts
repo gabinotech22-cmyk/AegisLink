@@ -66,4 +66,28 @@ describe('runVaultOp', () => {
     expect(runVaultOp(vault, 'load', ['self', c.value.blob])).toMatchObject({ ok: false, code: 'REJECTED' })
     runVaultOp(vault, 'lockAll', [])
   })
+
+  it('deviceSync exports a PREKEY without the dialog, never an identity key; relabelled blobs never load', () => {
+    runVaultOp(vault, 'unlock', ['self'])
+    const asked: string[] = []
+    const hooks = { confirmExport: (p: string) => (asked.push(p), false) }
+    const pre = runVaultOp(vault, 'generate', ['self', 'x25519prekey']) as { value: { handle: number; blob: Uint8Array } }
+    const id = runVaultOp(vault, 'generate', ['self', 'x25519']) as { value: { handle: number; blob: Uint8Array } }
+    // The prekey: out without asking, 32 bytes.
+    const r = runVaultOp(vault, 'exportSecret', [pre.value.handle, 'x25519prekey', 'deviceSync'], hooks) as { ok: boolean; value: Uint8Array }
+    expect(r.ok).toBe(true)
+    expect(r.value).toHaveLength(32)
+    expect(asked).toEqual([])
+    // The identity key: deviceSync refuses it, whatever type the caller claims.
+    expect(runVaultOp(vault, 'exportSecret', [id.value.handle, 'x25519', 'deviceSync'], hooks)).toMatchObject({ ok: false, code: 'BAD_ARG' })
+    expect(runVaultOp(vault, 'exportSecret', [id.value.handle, 'x25519prekey', 'deviceSync'], hooks)).toMatchObject({ ok: false, code: 'NOKEY' })
+    // …and relabelling its blob as a prekey (type byte 3) does not load: the type is boxed (blob v2).
+    const relabelled = id.value.blob.slice()
+    relabelled[3] = 5
+    expect(runVaultOp(vault, 'load', ['self', relabelled])).toMatchObject({ ok: false, code: 'REJECTED' })
+    // A prekey does X25519 operations.
+    const peer = crypto.getRandomValues(new Uint8Array(32))
+    expect(runVaultOp(vault, 'scalarMult', [pre.value.handle, peer])).toMatchObject({ ok: true })
+    runVaultOp(vault, 'lockAll', [])
+  })
 })

@@ -20,6 +20,7 @@ import { runAnonymousOnboarding } from '../onboarding';
 import { performX3DH, performX3DHReceiver } from '../signal/x3dh';
 import { initRatchet, type RatchetState } from '../signal/ratchet';
 import { encryptMessage, openEnvelope, tryDecryptMessage } from '../messaging';
+import { pk, pkOrNull } from './helpers/rawIdentity';
 
 jest.setTimeout(15000);
 
@@ -36,10 +37,10 @@ function setupSession(): Pair {
 
   const x = performX3DH(alice.identity, bob.bundle);
   const opkId = bob.bundle.oneTimePreKey?.keyId ?? null;
-  const opkSec = opkId !== null ? bob.secrets.opkSecrets.get(opkId) ?? null : null;
+  const opkSec = opkId !== null ? pkOrNull(bob.secrets.opkSecrets.get(opkId)) : null;
   const bobRoot = performX3DHReceiver(
     bob.identity,
-    bob.secrets.signedPreKey.secretKey,
+    pk(bob.secrets.signedPreKey.secretStored),
     opkSec,
     alice.identity.publicKey,
     decodeBase64(x.myEphemeralPublicKeyB64),
@@ -49,7 +50,7 @@ function setupSession(): Pair {
   const aliceState = initRatchet(x.rootKey, bobSpkPub, true);
   const bobState = initRatchet(bobRoot, new Uint8Array(), false, {
     publicKey: bobSpkPub,
-    secretKey: bob.secrets.signedPreKey.secretKey,
+    secretKey: pk(bob.secrets.signedPreKey.secretStored),
   });
 
   return { alice, bob, aliceState, bobState };

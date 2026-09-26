@@ -52,6 +52,7 @@ jest.mock('expo-secure-store', () => ({
 
 import { uploadIdentityAndPrekeys } from '../registration';
 import { identityFromRaw } from './helpers/rawIdentity';
+import { pk, pkOrNull } from './helpers/rawIdentity';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
@@ -62,7 +63,7 @@ function buildIdentity(): Identity {
 function buildPrekeys(identity: Identity, spkKeyId: number) {
   const pre = generatePreKeys(identity, 1, 4, spkKeyId);
   const secrets: PreKeySecrets = {
-    signedPreKey: { keyId: pre.signedPreKey.keyId, secretKey: pre.signedPreKey.secretKey },
+    signedPreKey: { keyId: pre.signedPreKey.keyId, secretStored: pre.signedPreKey.secretStored },
     opkSecrets: pre.opkSecrets,
   };
   const spkPublic: SignedPreKeyPublic = {
@@ -105,7 +106,7 @@ describe('uploadIdentityAndPrekeys — durable SPK secret persistence invariant'
 
     // SPK secret durable + readable by keyId.
     expect(mockDbSpkKeyId).toBe(spkKeyId);
-    expect(mockDbSpk.get(spkKeyId)).toBe(encodeBase64(secrets.signedPreKey.secretKey));
+    expect(mockDbSpk.get(spkKeyId)).toBe(secrets.signedPreKey.secretStored);
     // Every OPK secret persisted too.
     expect(mockDbOpk.size).toBe(secrets.opkSecrets.size);
 

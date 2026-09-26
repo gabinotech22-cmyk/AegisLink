@@ -1,5 +1,6 @@
 import { nacl } from './sodium';
 import { vault, type VaultKey } from './sodium/vault';
+import { cloneRef } from './sodium/secretRef';
 import { decodeUTF8, encodeUTF8, decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { ratchetEncrypt, ratchetDecrypt, type RatchetState } from './signal/ratchet';
 import { stripAndPad, unpad } from './metadata';
@@ -325,11 +326,11 @@ function cloneRatchetState(s: RatchetState): RatchetState {
   for (const [k, v] of s.MKSKIPPED) skipped.set(k, new Uint8Array(v));
   return {
     ...s,
-    DHs: { publicKey: new Uint8Array(s.DHs.publicKey), secretKey: new Uint8Array(s.DHs.secretKey) },
+    DHs: { publicKey: new Uint8Array(s.DHs.publicKey), secretKey: cloneRef(s.DHs.secretKey) },
     DHr: s.DHr ? new Uint8Array(s.DHr) : null,
     RK: new Uint8Array(s.RK),
     PQs: s.PQs
-      ? { publicKey: new Uint8Array(s.PQs.publicKey), secretKey: new Uint8Array(s.PQs.secretKey) }
+      ? { publicKey: new Uint8Array(s.PQs.publicKey), secretKey: cloneRef(s.PQs.secretKey) }
       : s.PQs,
     PQr: s.PQr ? new Uint8Array(s.PQr) : s.PQr,
     pqSendCt: s.pqSendCt ? new Uint8Array(s.pqSendCt) : s.pqSendCt,

@@ -1,4 +1,5 @@
 import { nacl, ml_kem768 } from '../sodium';
+import { dhWith, decapsulateWith, zeroizeRef, cloneRef, type SecretRef } from '../sodium/secretRef';
 import { encodeBase64 } from 'tweetnacl-util';
 import { hkdfSHA256, hmacSHA256 } from './kdf';
 
@@ -9,7 +10,11 @@ const MLKEM768_SHAREDSECRET_BYTES = 32;
 
 export interface RatchetState {
   // Diffie-Hellman Ratchet state
-  DHs: { publicKey: Uint8Array; secretKey: Uint8Array }; // Our current DH pair
+  // Our current DH pair. The secret is raw bytes, EXCEPT for a receiver's
+  // initial pair: Bob starts from his SPK, which is a key-vault handle (F-1b
+  // phase 2) consumed by the first dhRatchet step and never persisted
+  // (ratchetSerde refuses to serialize a handle).
+  DHs: { publicKey: Uint8Array; secretKey: SecretRef };
   DHr: Uint8Array | null; // Contact's current public DH key
 
   // Root Chain state
@@ -22,7 +27,7 @@ export interface RatchetState {
   // peer / pre-R1 session) and every ratchet step is byte-identical to the
   // pre-R1 Double Ratchet. PQ material is mixed into the ROOT key at each chain
   // turn only (not per message), so MKSKIPPED stays purely symmetric.
-  PQs?: { publicKey: Uint8Array; secretKey: Uint8Array } | null;
+  PQs?: { publicKey: Uint8Array; secretKey: SecretRef } | null; // like DHs: Bob's initial PQs is his PQSPK handle
   PQr?: Uint8Array | null;
   // ML-KEM ciphertext to ADVERTISE on the chain-turn message of the current
   // sending chain (we encapsulated it to PQr when we created this sending
@@ -204,26 +209,27 @@ export function initRatchet(
   rootKey: Uint8Array,
   contactDHPublicKey: Uint8Array,
   isAlice: boolean,
-  initialDHs?: { publicKey: Uint8Array; secretKey: Uint8Array },
+  initialDHs?: { publicKey: Uint8Array; secretKey: SecretRef },
   // ─── Hybrid PQ bootstrap (R1) ──────────────────────────────────────────────
   // Bob's ML-KEM-768 PQSPK keypair, already established during PQXDH. Bob
   // passes it as `initialPQs` (mirrors `initialDHs`); Alice passes Bob's
   // PQSPK PUBLIC key as `initialPQr` (she learned it from Bob's prekey
   // bundle). Omitting both keeps the session classic v1 (pre-R1, no PQ
   // mixing) — required for byte-identical legacy KAT compatibility.
-  initialPQs?: { publicKey: Uint8Array; secretKey: Uint8Array } | null,
+  initialPQs?: { publicKey: Uint8Array; secretKey: SecretRef } | null,
   initialPQr?: Uint8Array | null,
 ): RatchetState {
   // Bob (receiver) MUST start with his SPK pair as DHs so that the first
   // dhRatchet step matches Alice's: DH(bobSPK.sec, alice.DHs.pub) ==
   // DH(alice.DHs.sec, bobSPK.pub). A random pair breaks key agreement.
-  // We defensively copy initialDHs so that zeroizing it later doesn't wipe the caller's shared SPK.
-  const dhPair = initialDHs
-    ? { publicKey: new Uint8Array(initialDHs.publicKey), secretKey: new Uint8Array(initialDHs.secretKey) }
+  // We defensively copy initialDHs so that zeroizing it later doesn't wipe the
+  // caller's shared SPK (a vault handle is shared, never zeroed or released here).
+  const dhPair: { publicKey: Uint8Array; secretKey: SecretRef } = initialDHs
+    ? { publicKey: new Uint8Array(initialDHs.publicKey), secretKey: cloneRef(initialDHs.secretKey) }
     : nacl.box.keyPair();
   const hybrid = !!(initialPQs || initialPQr);
   const pqPair = initialPQs
-    ? { publicKey: new Uint8Array(initialPQs.publicKey), secretKey: new Uint8Array(initialPQs.secretKey) }
+    ? { publicKey: new Uint8Array(initialPQs.publicKey), secretKey: cloneRef(initialPQs.secretKey) }
     : null;
   const state: RatchetState = {
     DHs: dhPair,
@@ -243,7 +249,7 @@ export function initRatchet(
 
   if (isAlice) {
     // Alice sends the first message, she needs to do the first DH ratchet step immediately
-    const dhOut = assertNonZeroDH(nacl.scalarMult(dhPair.secretKey, contactDHPublicKey));
+    const dhOut = assertNonZeroDH(dhWith(dhPair.secretKey, contactDHPublicKey));
     let pqSecret: Uint8Array | null = null;
     if (hybrid) {
       // Alice generates her own fresh PQ pair for this sending chain and
@@ -343,7 +349,7 @@ function dhRatchet(
 ) {
   // Validate the incoming ratchet key produces a sound DH BEFORE mutating any
   // counters/keys, so a low-order-point header cannot corrupt the live state.
-  const dhOut1 = assertNonZeroDH(nacl.scalarMult(state.DHs.secretKey, header.ratchetKey));
+  const dhOut1 = assertNonZeroDH(dhWith(state.DHs.secretKey, header.ratchetKey));
 
   // Hybrid PQ (R1): a hybrid session always carries pqPub+pqCt on the first
   // message of a new sending chain (see ratchetEncrypt). Their absence on a
@@ -355,7 +361,7 @@ function dhRatchet(
   }
   let pqSecret1: Uint8Array | null = null;
   if (hybrid && header.pqCt) {
-    pqSecret1 = assertNonZeroSharedSecret(ml_kem768.decapsulate(header.pqCt, state.PQs!.secretKey));
+    pqSecret1 = assertNonZeroSharedSecret(decapsulateWith(header.pqCt, state.PQs!.secretKey));
   }
 
   state.PN = state.Ns;
@@ -380,13 +386,13 @@ function dhRatchet(
   // Step 2: Generate a new DH (+ PQ, if hybrid) pair for ourselves
   const oldDHs = state.DHs;
   state.DHs = nacl.box.keyPair();
-  zeroize(oldDHs.secretKey);
+  zeroizeRef(oldDHs.secretKey);
   const oldPQs = state.PQs;
   if (hybrid) state.PQs = ml_kem768.keygen();
 
   // Step 3: DH (+ PQ encapsulation to the peer's freshly-learned PQr, if
   // hybrid) using our NEW pair and the DHr/PQr to derive CKs.
-  const dhOut2 = assertNonZeroDH(nacl.scalarMult(state.DHs.secretKey, state.DHr));
+  const dhOut2 = assertNonZeroDH(dhWith(state.DHs.secretKey, state.DHr));
   let pqSecret2: Uint8Array | null = null;
   if (hybrid && state.PQr) {
     const { cipherText, sharedSecret } = ml_kem768.encapsulate(state.PQr);
@@ -402,7 +408,7 @@ function dhRatchet(
   if (oldCKs) zeroize(oldCKs);
   zeroize(dhOut2);
   if (pqSecret2) zeroize(pqSecret2);
-  if (oldPQs) zeroize(oldPQs.secretKey);
+  if (oldPQs) zeroizeRef(oldPQs.secretKey);
 }
 
 /**
@@ -416,12 +422,12 @@ export function cloneState(state: RatchetState): RatchetState {
   return {
     DHs: {
       publicKey: new Uint8Array(state.DHs.publicKey),
-      secretKey: new Uint8Array(state.DHs.secretKey),
+      secretKey: cloneRef(state.DHs.secretKey),
     },
     DHr: state.DHr ? new Uint8Array(state.DHr) : null,
     RK: new Uint8Array(state.RK),
     PQs: state.PQs
-      ? { publicKey: new Uint8Array(state.PQs.publicKey), secretKey: new Uint8Array(state.PQs.secretKey) }
+      ? { publicKey: new Uint8Array(state.PQs.publicKey), secretKey: cloneRef(state.PQs.secretKey) }
       : state.PQs,
     PQr: state.PQr ? new Uint8Array(state.PQr) : state.PQr,
     pqSendCt: state.pqSendCt ? new Uint8Array(state.pqSendCt) : state.pqSendCt,
@@ -442,11 +448,11 @@ export function cloneState(state: RatchetState): RatchetState {
  * commit a speculative decryption back onto the live ratchet state.
  */
 function commitState(dst: RatchetState, src: RatchetState): void {
-  zeroize(dst.DHs.secretKey);
+  zeroizeRef(dst.DHs.secretKey);
   if (dst.CKs) zeroize(dst.CKs);
   if (dst.CKr) zeroize(dst.CKr);
   zeroize(dst.RK);
-  if (dst.PQs) zeroize(dst.PQs.secretKey);
+  if (dst.PQs) zeroizeRef(dst.PQs.secretKey);
   for (const v of dst.MKSKIPPED.values()) zeroize(v);
 
   dst.DHs = src.DHs;
@@ -467,11 +473,11 @@ function commitState(dst: RatchetState, src: RatchetState): void {
 
 /** Zeroize all key material held by a discarded speculative clone. */
 function discardState(s: RatchetState): void {
-  zeroize(s.DHs.secretKey);
+  zeroizeRef(s.DHs.secretKey);
   if (s.CKs) zeroize(s.CKs);
   if (s.CKr) zeroize(s.CKr);
   zeroize(s.RK);
-  if (s.PQs) zeroize(s.PQs.secretKey);
+  if (s.PQs) zeroizeRef(s.PQs.secretKey);
   for (const v of s.MKSKIPPED.values()) zeroize(v);
 }
 

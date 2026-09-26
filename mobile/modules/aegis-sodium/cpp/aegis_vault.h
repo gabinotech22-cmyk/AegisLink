@@ -6,7 +6,8 @@
  * operation) and are named by opaque handles. A key leaves the vault only
  * WRAPPED: crypto_secretbox under the profile's key-encryption key (KEK), with
  * the key type and the profile slot authenticated inside the box, so a blob of
- * one profile or type never loads as another. The KEK itself is kept by the OS
+ * one profile or type never loads as another (blob v2; v1 kept the type only
+ * in the unauthenticated header and never shipped in a release). The KEK itself is kept by the OS
  * (Keychain / Keystore) and handed to the vault by the platform binding.
  *
  * Thread safety: every function takes the vault mutex.
@@ -36,10 +37,19 @@ extern "C" {
 #define AEGIS_KEY_ED25519 2  /* 64-byte Ed25519 secret (seed || public key) */
 #define AEGIS_KEY_MLKEM768 3 /* 2400-byte ML-KEM-768 decapsulation key */
 #define AEGIS_KEY_SECRET32 4 /* 32-byte symmetric secret (ratchet chain/root keys) */
+/* 32-byte X25519 PREKEY secret (SPK / OPK): the same operations as
+ * AEGIS_KEY_X25519, but a distinct type so a platform can apply a lighter
+ * export policy to prekeys than to the identity key (the desktop syncs its SPK
+ * to linked devices without asking the user; the identity key needs consent).
+ * Types are authenticated inside the blob, so one cannot pass for the other. */
+#define AEGIS_KEY_X25519_PREKEY 5
 
-/* Blob = "AV" | version | type | nonce(24) | secretbox(slotlen | slot | key). */
+/* Blob v2 = "AV" | 2 | type | nonce(24) | secretbox(type | slotlen | slot | key).
+ * The type is authenticated inside the box (a header type that disagrees with
+ * the boxed one is rejected), and so is the profile slot. */
+#define AEGIS_VAULT_BLOB_VERSION 2
 #define AEGIS_VAULT_BLOB_HEADER 28
-#define AEGIS_VAULT_BLOB_LEN(slotlen, keylen) (AEGIS_VAULT_BLOB_HEADER + 16 + 1 + (slotlen) + (keylen))
+#define AEGIS_VAULT_BLOB_LEN(slotlen, keylen) (AEGIS_VAULT_BLOB_HEADER + 16 + 2 + (slotlen) + (keylen))
 
 /* Secret length of a key type; 0 for an unknown type. */
 size_t aegis_vault_key_len(int type);

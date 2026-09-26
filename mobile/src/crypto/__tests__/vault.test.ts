@@ -114,6 +114,32 @@ describe('key vault', () => {
     expect(() => vault.copy(key, 'nowhere')).toThrow(VaultKeyUnavailableError);
   });
 
+  it('authenticates the key type: an identity blob relabelled as a prekey never loads (blob v2)', async () => {
+    await vault.unlock('self');
+    const { blob } = vault.generate('self', 'x25519');
+    for (const fake of [5, 4]) {
+      const relabelled = blob.slice();
+      relabelled[3] = fake; // x25519prekey / secret32: same key length
+      expect(() => vault.load('self', relabelled)).toThrow(VaultBlobRejectedError);
+    }
+    const v1 = blob.slice();
+    v1[2] = 1;
+    expect(() => vault.load('self', v1)).toThrow();
+  });
+
+  it('an x25519prekey does every X25519 operation but exports only as a prekey', async () => {
+    await vault.unlock('self');
+    const sk = rand(32);
+    const peer = tweetnacl.box.keyPair();
+    const { key } = vault.import('self', 'x25519prekey', sk.slice());
+    expect(vault.scalarMult(key, peer.publicKey)).toEqual(tweetnacl.scalarMult(sk, peer.publicKey));
+    const nonce = rand(24);
+    const m = rand(40);
+    expect(vault.box(key, m, nonce, peer.publicKey)).toEqual(tweetnacl.box(m, nonce, peer.publicKey, sk));
+    expect(vault.exportSecret(key)).toEqual(sk);
+    expect(() => vault.deriveEd25519(key)).toThrow(/needs a x25519 key/);
+  });
+
   it('refuses wrong key types, sizes and slot names', async () => {
     await vault.unlock('self');
     const { key: x } = vault.generate('self', 'x25519');

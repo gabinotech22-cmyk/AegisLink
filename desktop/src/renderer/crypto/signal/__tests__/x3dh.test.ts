@@ -13,6 +13,7 @@ import { initRatchet, ratchetEncrypt, ratchetDecrypt } from '../ratchet';
 import { type Identity } from '../../identity';
 import { hkdfSHA256 } from '../kdf';
 import { identityFromRaw } from '../../__tests__/helpers/rawIdentity';
+import { pk, pkOrNull } from '../../__tests__/helpers/rawIdentity';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
@@ -139,9 +140,9 @@ describe('X3DH sender/receiver root-key symmetry', () => {
 
     // Bob derives using the SPK secret matching the keyId Alice committed to, and
     // (when present) the OPK secret for the opkId in Alice's header.
-    const mySpkSecret = bobPreKeys.signedPreKey.secretKey;
+    const mySpkSecret = pk(bobPreKeys.signedPreKey.secretStored);
     const myOpkSecret =
-      opk !== null ? (bobPreKeys.opkSecrets.get(opk.keyId) ?? null) : null;
+      opk !== null ? (pkOrNull(bobPreKeys.opkSecrets.get(opk.keyId))) : null;
 
     const bobRoot = performX3DHReceiver(
       bob,
@@ -186,7 +187,7 @@ describe('X3DH sender/receiver root-key symmetry', () => {
     const aliceResult = performX3DH(alice, bundle);
     const bobRootNoDh4 = performX3DHReceiver(
       bob,
-      bobPreKeys.signedPreKey.secretKey,
+      pk(bobPreKeys.signedPreKey.secretStored),
       null, // BUG simulation: Bob omits DH4 although Alice used it
       alice.publicKey,
       decodeBase64(aliceResult.myEphemeralPublicKeyB64),
@@ -231,8 +232,8 @@ describe('X3DH + Double Ratchet fresh-session first-message roundtrip', () => {
     const { ciphertext, nonce, header } = ratchetEncrypt(aliceState, plaintext);
 
     // Bob — mirrors decryptAndAppend's X3DH branch.
-    const mySpkSecret = bobPreKeys.signedPreKey.secretKey;
-    const myOpkSecret = opk ? (bobPreKeys.opkSecrets.get(opk.keyId) ?? null) : null;
+    const mySpkSecret = pk(bobPreKeys.signedPreKey.secretStored);
+    const myOpkSecret = opk ? (pkOrNull(bobPreKeys.opkSecrets.get(opk.keyId))) : null;
     const bobRoot = performX3DHReceiver(
       bob,
       mySpkSecret,
@@ -240,7 +241,7 @@ describe('X3DH + Double Ratchet fresh-session first-message roundtrip', () => {
       alice.publicKey,
       decodeBase64(aliceX3DH.myEphemeralPublicKeyB64),
     );
-    const spkPub = nacl.scalarMult.base(mySpkSecret);
+    const spkPub = mySpkSecret.publicKey;
     const bobState = initRatchet(bobRoot, header.ratchetKey, false, {
       publicKey: spkPub,
       secretKey: mySpkSecret,
@@ -311,13 +312,13 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
     const opk = bobPreKeys.oneTimePreKeys[0];
     const bobRoot = performX3DHReceiver(
       bob,
-      bobPreKeys.signedPreKey.secretKey,
-      bobPreKeys.opkSecrets.get(opk.keyId) ?? null,
+      pk(bobPreKeys.signedPreKey.secretStored),
+      pkOrNull(bobPreKeys.opkSecrets.get(opk.keyId)),
       alice.publicKey,
       decodeBase64(aliceResult.myEphemeralPublicKeyB64),
       {
         cipherText: decodeBase64(aliceResult.pqCiphertextB64!),
-        pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+        pqSpkSecret: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768'),
       },
     );
 
@@ -335,13 +336,13 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
 
     const bobRoot = performX3DHReceiver(
       bob,
-      bobPreKeys.signedPreKey.secretKey,
+      pk(bobPreKeys.signedPreKey.secretStored),
       null,
       alice.publicKey,
       decodeBase64(aliceResult.myEphemeralPublicKeyB64),
       {
         cipherText: decodeBase64(aliceResult.pqCiphertextB64!),
-        pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+        pqSpkSecret: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768'),
       },
     );
 
@@ -433,8 +434,8 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
     const opk = bobPreKeys.oneTimePreKeys[0];
     const bobRoot = performX3DHReceiver(
       bob,
-      bobPreKeys.signedPreKey.secretKey,
-      bobPreKeys.opkSecrets.get(opk.keyId) ?? null,
+      pk(bobPreKeys.signedPreKey.secretStored),
+      pkOrNull(bobPreKeys.opkSecrets.get(opk.keyId)),
       alice.publicKey,
       decodeBase64(aliceResult.myEphemeralPublicKeyB64),
       null, // no PQ inputs — classic path
@@ -457,11 +458,11 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
 
     const bobRoot = performX3DHReceiver(
       bob,
-      bobPreKeys.signedPreKey.secretKey,
+      pk(bobPreKeys.signedPreKey.secretStored),
       null,
       alice.publicKey,
       decodeBase64(aliceResult.myEphemeralPublicKeyB64),
-      { cipherText: ct, pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey },
+      { cipherText: ct, pqSpkSecret: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768') },
     );
 
     expect(encodeBase64(bobRoot)).not.toBe(encodeBase64(aliceResult.rootKey));
@@ -487,19 +488,19 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
     const opk = bobPreKeys.oneTimePreKeys[0];
     const bobRoot = performX3DHReceiver(
       bob,
-      bobPreKeys.signedPreKey.secretKey,
-      bobPreKeys.opkSecrets.get(opk.keyId) ?? null,
+      pk(bobPreKeys.signedPreKey.secretStored),
+      pkOrNull(bobPreKeys.opkSecrets.get(opk.keyId)),
       alice.publicKey,
       decodeBase64(aliceX3DH.myEphemeralPublicKeyB64),
       {
         cipherText: decodeBase64(aliceX3DH.pqCiphertextB64!),
-        pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+        pqSpkSecret: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768'),
       },
     );
-    const spkPub = nacl.scalarMult.base(bobPreKeys.signedPreKey.secretKey);
+    const spkPub = pk(bobPreKeys.signedPreKey.secretStored).publicKey;
     const bobState = initRatchet(bobRoot, header.ratchetKey, false, {
       publicKey: spkPub,
-      secretKey: bobPreKeys.signedPreKey.secretKey,
+      secretKey: pk(bobPreKeys.signedPreKey.secretStored),
     });
 
     const out = ratchetDecrypt(bobState, header, ciphertext, nonce);
@@ -554,13 +555,13 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     const opk = bobPreKeys.oneTimePreKeys[0];
     const bobRoot = performX3DHReceiver(
       bob,
-      bobPreKeys.signedPreKey.secretKey,
-      bobPreKeys.opkSecrets.get(opk.keyId) ?? null,
+      pk(bobPreKeys.signedPreKey.secretStored),
+      pkOrNull(bobPreKeys.opkSecrets.get(opk.keyId)),
       alice.publicKey,
       decodeBase64(aliceX3DH.myEphemeralPublicKeyB64),
       {
         cipherText: decodeBase64(aliceX3DH.pqCiphertextB64!),
-        pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+        pqSpkSecret: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768'),
       },
     );
 
@@ -573,15 +574,15 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
 
     // Bob seeds his own PQSPK keypair as his initial PQs (mirrors
     // socket/client.ts's decryptAndAppendLocked).
-    const spkPub = nacl.scalarMult.base(bobPreKeys.signedPreKey.secretKey);
+    const spkPub = pk(bobPreKeys.signedPreKey.secretStored).publicKey;
     const bobState = initRatchet(
       bobRoot,
       first.header.ratchetKey,
       false,
-      { publicKey: spkPub, secretKey: bobPreKeys.signedPreKey.secretKey },
+      { publicKey: spkPub, secretKey: pk(bobPreKeys.signedPreKey.secretStored) },
       {
         publicKey: decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64),
-        secretKey: bobPreKeys.pqSignedPreKey.secretKey,
+        secretKey: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768'),
       },
     );
 

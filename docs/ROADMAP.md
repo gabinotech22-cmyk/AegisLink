@@ -198,7 +198,15 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
         `identityFromStored.*.test.ts` y `vaultExport.guard.test.ts` (gemelos),
         `store/__tests__/identity.vaultMigration.test.ts`, `ops.test.ts`, `differential.mjs`
         (`vault_export`, `vault_copy`).
-      - [ ] 2 — prekeys (SPK/OPK/PQSPK) y ML-KEM desktop en main.
+      - [x] **2 — prekeys y ML-KEM desktop en main** ✅: SPK/OPK/PQSPK se generan y guardan en la
+        bóveda (blobs; migración de las guardadas en crudo), el X3DH receptor y el primer paso del
+        ratchet las usan por handle, y la SPK sale solo hacia los dispositivos vinculados del usuario.
+        Blobs v2 con el tipo autenticado y tipo `x25519prekey` (el escritorio la sincroniza sin
+        diálogo y la identidad sigue protegida). ML-KEM-768 del escritorio pasa al proceso main
+        (@noble; sodium-native no lo expone). Pruebas: `differential.mjs` (tipo reetiquetado, v1,
+        prekey), `ensureDevicePreKeys.test.ts` (migración), `ratchetSerde.persistence.test.ts`
+        (no persiste handles), `vault.test.ts`, `ops.test.ts` (deviceSync), `crypto-imports.test.ts`
+        (sin @noble/post-quantum en el renderer).
       - [ ] 3 — estado del Double Ratchet (C en mobile, main en desktop), sellado.
 - [x] **Argon2id nativo en mobile** ✅ (#549; efectivo desde el primer build nativo que lo incluya):
       PIN y backup v3 corren en libsodium nativo, fuera del hilo de JS. **Sin formato de backup

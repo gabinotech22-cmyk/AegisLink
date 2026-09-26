@@ -21,6 +21,7 @@ import {
   MAX_SKIPPED_KEYS,
   type RatchetState,
 } from '../ratchet';
+import { pk, pkOrNull } from '../../__tests__/helpers/rawIdentity';
 
 interface Session {
   aliceState: RatchetState;
@@ -33,10 +34,10 @@ function newSession(): Session {
 
   const x = performX3DH(alice.identity, bob.bundle);
   const opkId = bob.bundle.oneTimePreKey?.keyId ?? null;
-  const opkSec = opkId !== null ? bob.secrets.opkSecrets.get(opkId) ?? null : null;
+  const opkSec = opkId !== null ? pkOrNull(bob.secrets.opkSecrets.get(opkId)) : null;
   const bobRoot = performX3DHReceiver(
     bob.identity,
-    bob.secrets.signedPreKey.secretKey,
+    pk(bob.secrets.signedPreKey.secretStored),
     opkSec,
     alice.identity.publicKey,
     decodeBase64(x.myEphemeralPublicKeyB64),
@@ -46,7 +47,7 @@ function newSession(): Session {
   const aliceState = initRatchet(x.rootKey, bobSpkPub, true);
   const bobState = initRatchet(bobRoot, new Uint8Array(), false, {
     publicKey: bobSpkPub,
-    secretKey: bob.secrets.signedPreKey.secretKey,
+    secretKey: pk(bob.secrets.signedPreKey.secretStored),
   });
   return { aliceState, bobState };
 }
@@ -203,13 +204,13 @@ function newHybridSession(): Session {
   expect(x.version).toBe(2); // sanity: PQXDH negotiated
   const bobRoot = performX3DHReceiver(
     bob.identity,
-    bobPreKeys.signedPreKey.secretKey,
+    pk(bobPreKeys.signedPreKey.secretStored),
     null,
     alice.identity.publicKey,
     decodeBase64(x.myEphemeralPublicKeyB64),
     {
       cipherText: decodeBase64(x.pqCiphertextB64!),
-      pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+      pqSpkSecret: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768'),
     },
   );
 
@@ -221,8 +222,8 @@ function newHybridSession(): Session {
     bobRoot,
     new Uint8Array(),
     false,
-    { publicKey: bobSpkPub, secretKey: bobPreKeys.signedPreKey.secretKey },
-    { publicKey: bobPqPub, secretKey: bobPreKeys.pqSignedPreKey.secretKey },
+    { publicKey: bobSpkPub, secretKey: pk(bobPreKeys.signedPreKey.secretStored) },
+    { publicKey: bobPqPub, secretKey: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768') },
     null,
   );
   return { aliceState, bobState };

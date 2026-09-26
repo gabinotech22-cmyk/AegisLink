@@ -18,6 +18,7 @@ const ALLOWED: Record<string, string> = {
   'crypto/sodium/vault.ts': 'defines exportSecret',
   'crypto/identity.ts': 'defines exportIdentitySecrets',
   'screens/Backup.tsx': 'encrypted backup + recovery phrase',
+  'crypto/signal/x3dh.ts': 'SPK to our own linked devices (deviceSync: prekeys only, no identity key)',
 };
 
 const EXPORT_CALL = /\b(?:exportSecret|exportIdentitySecrets)\s*\(/;

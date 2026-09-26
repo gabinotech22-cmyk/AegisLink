@@ -240,7 +240,7 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
 {
   const enc = new TextEncoder();
   const ENOKEY = -3;
-  const blobLen = (slot, keyLen) => 28 + 16 + 1 + slot.length + keyLen;
+  const blobLen = (slot, keyLen) => 28 + 16 + 2 + slot.length + keyLen; // blob v2: type + slot boxed
   const slot = enc.encode('self');
   const kek = rand(32);
   call('vault_unlock', [slot, kek], expectRc(OK));
@@ -317,6 +317,31 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
   call('vault_copy', ['#4', `#${blobLen(work, 32)}`, '$hx', enc.encode('nope')], expectRc(ENOKEY));
   call('vault_lock', [other], expectRc(OK));
   call('vault_lock', [work], expectRc(OK));
+
+  // Blob v2: the type is authenticated inside the box. Relabelling an identity
+  // X25519 blob as a prekey (5) or a symmetric secret (4) — same key length —
+  // must not load; nor may a v1 blob.
+  const xBlobLen = blobLen(slot, 32);
+  for (const fake of [5, 4]) {
+    call('poke', [`#${xBlobLen}=bxr${fake}`, '$bx', le32(3), le32(fake)], expectRc(OK));
+    call('vault_load', ['#4', '#4', '#32', slot, `$bxr${fake}`], expectRc(EVERIFY));
+  }
+  call('poke', [`#${xBlobLen}=bxv1`, '$bx', le32(2), le32(1)], expectRc(OK));
+  call('vault_load', ['#4', '#4', '#32', slot, '$bxv1'], expectRc(EBADLEN));
+
+  // X25519 prekey (type 5): every X25519 operation, but its own type for export.
+  const prek = rand(32);
+  call('vault_import', ['#4=hp', `#${blobLen(slot, 32)}=bp`, '#32', slot, le32(5), prek], (rc, [, , pub]) =>
+    rc === OK && eq(pub, nacl.scalarMult.base(prek)) ? null : 'prekey import: wrong public key');
+  call('vault_scalarmult', ['$hp', '#32', peer.publicKey], expectBytes(nacl.scalarMult(prek, peer.publicKey)));
+  call('vault_box', ['$hp', `#${msg.length + 16}`, msg, nonce, peer.publicKey], expectBytes(nacl.box(msg, nonce, peer.publicKey, prek)));
+  call('vault_export', ['$hp', le32(5), '#32'], expectBytes(prek));
+  call('vault_export', ['$hp', le32(1), '#32'], expectRc(ENOKEY)); // a prekey is not exported as an identity key
+  call('vault_export', ['$hx', le32(5), '#32'], expectRc(ENOKEY)); // nor the identity key as a prekey
+  call('vault_derive_ed25519', ['#4', `#${blobLen(slot, 64)}`, '#32', '$hp'], expectRc(ENOKEY)); // identity derivation: identity keys only
+  call('vault_load', ['#4', '#4', '#32', slot, '$bp'], (rc, [, type]) =>
+    rc === OK && new DataView(type.buffer, type.byteOffset, 4).getInt32(0, true) === 5 ? null : 'prekey load: wrong type');
+  call('vault_generate', ['#4', `#${blobLen(slot, 32)}`, '#32', slot, le32(5)], expectRc(OK));
 
   // Release and lock kill handles; a locked profile loads nothing.
   call('vault_release', ['$hx2'], expectRc(OK));

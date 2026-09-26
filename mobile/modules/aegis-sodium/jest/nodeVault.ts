@@ -23,10 +23,15 @@ const X25519 = 1;
 const ED25519 = 2;
 const MLKEM768 = 3;
 const SECRET32 = 4;
-const KEY_LEN: Record<number, number> = { [X25519]: 32, [ED25519]: 64, [MLKEM768]: 2400, [SECRET32]: 32 };
-const PUB_LEN: Record<number, number> = { [X25519]: 32, [ED25519]: 32, [MLKEM768]: 1184, [SECRET32]: 0 };
+const X25519_PREKEY = 5;
+const KEY_LEN: Record<number, number> = { [X25519]: 32, [ED25519]: 64, [MLKEM768]: 2400, [SECRET32]: 32, [X25519_PREKEY]: 32 };
+const PUB_LEN: Record<number, number> = { [X25519]: 32, [ED25519]: 32, [MLKEM768]: 1184, [SECRET32]: 0, [X25519_PREKEY]: 32 };
 const HEADER = 28;
-const blobLen = (slotLen: number, keyLen: number): number => HEADER + 16 + 1 + slotLen + keyLen;
+const VERSION = 2;
+// Blob v2: "AV" | 2 | type | nonce | secretbox(type | slotlen | slot | key), as in aegis_vault.c.
+const blobLen = (slotLen: number, keyLen: number): number => HEADER + 16 + 2 + slotLen + keyLen;
+/** A key of type `have` serves an operation wanting `want` (an X25519 prekey does every X25519 operation). */
+const typeOk = (have: number, want: number): boolean => have === want || (want === X25519 && have === X25519_PREKEY);
 
 type Prims = Pick<AegisSodiumNative, 'signDetached' | 'scalarmult' | 'boxEasy' | 'boxOpenEasy' | 'mlkem768Dec'>;
 export type VaultMethods = Pick<
@@ -58,7 +63,7 @@ export function makeNodeVault(p: Prims): NodeVault {
     const want = PUB_LEN[type];
     if (want === 0 && pub.length === 0) return OK;
     if (pub.length !== want) return EBADLEN;
-    if (type === X25519) sodium.crypto_scalarmult_base(pub, secret);
+    if (type === X25519 || type === X25519_PREKEY) sodium.crypto_scalarmult_base(pub, secret);
     else if (type === ED25519) pub.set(secret.subarray(32, 64));
     else if (type === MLKEM768) pub.set(secret.subarray(1152, 1152 + 1184));
     else return EBADLEN;
@@ -67,11 +72,12 @@ export function makeNodeVault(p: Prims): NodeVault {
 
   function wrap(blob: Uint8Array, slot: Uint8Array, type: number, secret: Uint8Array): number {
     if (blob.length !== blobLen(slot.length, secret.length)) return EBADLEN;
-    const plain = new Uint8Array(1 + slot.length + secret.length);
-    plain[0] = slot.length;
-    plain.set(slot, 1);
-    plain.set(secret, 1 + slot.length);
-    blob.set([0x41, 0x56, 1, type]);
+    const plain = new Uint8Array(2 + slot.length + secret.length);
+    plain[0] = type;
+    plain[1] = slot.length;
+    plain.set(slot, 2);
+    plain.set(secret, 2 + slot.length);
+    blob.set([0x41, 0x56, VERSION, type]);
     const nonce = blob.subarray(4, 28);
     sodium.randombytes_buf(nonce);
     sodium.crypto_secretbox_easy(blob.subarray(HEADER), plain, nonce, unlocked.get(key(slot))!);
@@ -90,6 +96,14 @@ export function makeNodeVault(p: Prims): NodeVault {
   }
 
   function withKey(h: Uint8Array, type: number, fn: (secret: Uint8Array) => number): number {
+    const id = readHandle(h);
+    if (id === null) return EBADLEN;
+    const k = keys.get(id);
+    return k && typeOk(k.type, type) ? fn(k.secret) : ENOKEY;
+  }
+
+  /** Export: the exact declared type (a platform's export policy keys off it). */
+  function withExactKey(h: Uint8Array, type: number, fn: (secret: Uint8Array) => number): number {
     const id = readHandle(h);
     if (id === null) return EBADLEN;
     const k = keys.get(id);
@@ -160,7 +174,7 @@ export function makeNodeVault(p: Prims): NodeVault {
     },
     vaultLoad: (handle, typeOut, pub, slot, blob) => {
       if (!isBytes(blob) || !slotOk(slot) || !isBytes(handle) || handle.length !== 4 || !isBytes(typeOut) || typeOut.length !== 4) return EBADLEN;
-      if (blob.length < HEADER + 17 || blob[0] !== 0x41 || blob[1] !== 0x56 || blob[2] !== 1) return EBADLEN;
+      if (blob.length < HEADER + 18 || blob[0] !== 0x41 || blob[1] !== 0x56 || blob[2] !== VERSION) return EBADLEN;
       const type = blob[3];
       const len = KEY_LEN[type];
       if (!len || blob.length !== blobLen(slot.length, len)) return EBADLEN;
@@ -168,8 +182,8 @@ export function makeNodeVault(p: Prims): NodeVault {
       if (!kek) return ENOKEY;
       const plain = new Uint8Array(blob.length - HEADER - 16);
       if (!sodium.crypto_secretbox_open_easy(plain, blob.subarray(HEADER), blob.subarray(4, 28), kek)) return EVERIFY;
-      if (plain[0] !== slot.length || !Buffer.from(plain.subarray(1, 1 + slot.length)).equals(Buffer.from(slot))) return EVERIFY;
-      const secret = plain.subarray(1 + slot.length);
+      if (plain[0] !== type || plain[1] !== slot.length || !Buffer.from(plain.subarray(2, 2 + slot.length)).equals(Buffer.from(slot))) return EVERIFY;
+      const secret = plain.subarray(2 + slot.length);
       const rc = publicOf(type, secret, pub);
       if (rc === OK) {
         const h = next++;
@@ -217,7 +231,7 @@ export function makeNodeVault(p: Prims): NodeVault {
     vaultExport: (handle, type, out) => {
       const len = KEY_LEN[type];
       if (!len || !isBytes(out) || out.length !== len) return EBADLEN;
-      return withKey(handle, type, (sk) => { out.set(sk); return OK; });
+      return withExactKey(handle, type, (sk) => { out.set(sk); return OK; });
     },
     vaultLiveKeys: () => keys.size,
   };

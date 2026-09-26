@@ -1,7 +1,7 @@
-import { nacl } from '../sodium';
+import { nacl, ml_kem768 } from '../sodium';
 import { vault } from '../sodium/vault';
+import { dhWith, decapsulateWith, isVaultKey, type SecretRef } from '../sodium/secretRef';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { hkdfSHA256 } from './kdf';
 import { type Identity } from '../identity';
 import { verifyDetached } from '../ed25519';
@@ -258,8 +258,8 @@ export function performX3DH(
 export interface X3DHReceiverPqInputs {
   /** ML-KEM-768 ciphertext (raw bytes) Alice sent, to be decapsulated. */
   cipherText: Uint8Array;
-  /** This device's ML-KEM-768 PQSPK secret key (2400 bytes). Never leaves device. */
-  pqSpkSecret: Uint8Array;
+  /** This device's ML-KEM-768 PQSPK: a vault handle in the app (raw 2400 bytes in tests / golden vectors). */
+  pqSpkSecret: SecretRef;
 }
 
 /**
@@ -275,15 +275,15 @@ export interface X3DHReceiverPqInputs {
  */
 export function performX3DHReceiver(
   myIdentity: Identity,
-  mySpkSecret: Uint8Array,
-  myOpkSecret: Uint8Array | null,
+  mySpkSecret: SecretRef,
+  myOpkSecret: SecretRef | null,
   aliceIK: Uint8Array,
   aliceEK: Uint8Array,
   pq?: X3DHReceiverPqInputs | null,
 ): Uint8Array {
-  // Intermediates zeroized in `finally` below. NOTE: mySpkSecret/myOpkSecret/
-  // myIdentity.secretKey are caller-owned (the SPK in particular is reused
-  // across many incoming handshakes) and must NOT be zeroized here.
+  // Intermediates zeroized in `finally` below. NOTE: mySpkSecret/myOpkSecret
+  // are caller-owned (vault handles in the app; the SPK in particular is reused
+  // across many incoming handshakes) and must NOT be zeroized or released here.
   let dh1: Uint8Array | undefined;
   let dh2: Uint8Array | undefined;
   let dh3: Uint8Array | undefined;
@@ -293,9 +293,9 @@ export function performX3DHReceiver(
   let sharedSecret: Uint8Array | undefined;
 
   try {
-    dh1 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceIK), 'DH1');
+    dh1 = assertNonZeroDH(dhWith(mySpkSecret, aliceIK), 'DH1');
     dh2 = assertNonZeroDH(vault.scalarMult(myIdentity.secretKey, aliceEK), 'DH2');
-    dh3 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceEK), 'DH3');
+    dh3 = assertNonZeroDH(dhWith(mySpkSecret, aliceEK), 'DH3');
 
     const F = new Uint8Array(32).fill(0xFF);
     dhOut = new Uint8Array(F.length + dh1.length + dh2.length + dh3.length);
@@ -305,7 +305,7 @@ export function performX3DHReceiver(
     dhOut.set(dh3, F.length + dh1.length + dh2.length);
 
     if (myOpkSecret) {
-      dh4 = assertNonZeroDH(nacl.scalarMult(myOpkSecret, aliceEK), 'DH4');
+      dh4 = assertNonZeroDH(dhWith(myOpkSecret, aliceEK), 'DH4');
       const newDhOut = new Uint8Array(dhOut.length + dh4.length);
       newDhOut.set(dhOut, 0);
       newDhOut.set(dh4, dhOut.length);
@@ -317,13 +317,13 @@ export function performX3DHReceiver(
       if (pq.cipherText.length !== MLKEM768_CIPHERTEXT_BYTES) {
         throw new Error('PQXDH: Invalid ML-KEM-768 ciphertext length');
       }
-      if (pq.pqSpkSecret.length !== MLKEM768_SECRETKEY_BYTES) {
+      if (isVaultKey(pq.pqSpkSecret) ? pq.pqSpkSecret.type !== 'mlkem768' : pq.pqSpkSecret.length !== MLKEM768_SECRETKEY_BYTES) {
         throw new Error('PQXDH: Invalid ML-KEM-768 secret key length');
       }
       // ML-KEM decapsulation is implicit-rejection: a tampered ciphertext yields a
       // DIFFERENT pseudo-random shared secret rather than throwing, so Bob's root
       // key simply diverges from Alice's.
-      sharedSecret = ml_kem768.decapsulate(pq.cipherText, pq.pqSpkSecret);
+      sharedSecret = decapsulateWith(pq.cipherText, pq.pqSpkSecret);
       assertNonZeroSharedSecret(sharedSecret, 'PQXDH decapsulate');
       combined = new Uint8Array(dhOut.length + sharedSecret.length);
       combined.set(dhOut, 0);
@@ -373,25 +373,44 @@ export function shouldUsePqReceiver(
   return 'v1';
 }
 
+/**
+ * The device's prekeys (F-1b phase 2): public material for the bundle, and the
+ * secrets ONLY in their persisted form — vault blobs of the identity's profile
+ * ("vault1:…", `toStored`). The raw secrets never exist in JavaScript; the
+ * receiver loads a blob into a handle when a handshake needs it.
+ */
 export interface DevicePreKeySet {
   signedPreKey: {
     keyId: number;
     publicKeyB64: string;
     signatureB64: string;
-    secretKey: Uint8Array;
+    secretStored: string;
   };
   oneTimePreKeys: { keyId: number; publicKeyB64: string }[];
-  opkSecrets: Map<number, Uint8Array>;
+  /** keyId → persisted OPK secret (vault blob). */
+  opkSecrets: Map<number, string>;
   /**
    * PQXDH signed PQ prekey (ML-KEM-768). publicKeyB64 + signatureB64 go in the
-   * published bundle; secretKey (2400 bytes) stays on-device only.
+   * published bundle; the 2400-byte secret stays in the vault.
    */
   pqSignedPreKey: {
     keyId: number;
     publicKeyB64: string;
     signatureB64: string;
-    secretKey: Uint8Array;
+    secretStored: string;
   };
+}
+
+/** A fresh vault key of the identity's profile: its public half and persisted form (the handle is released). */
+function freshPrekey(slot: string, type: 'x25519prekey' | 'mlkem768'): { publicKey: Uint8Array; stored: string } {
+  let k: ReturnType<typeof vault.generateStored>;
+  try {
+    k = vault.generateStored(slot, type);
+  } catch (e) {
+    throw new Error(`${type === 'mlkem768' ? 'ml_kem768.keygen' : 'prekey keygen'} failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  vault.release(k.key);
+  return { publicKey: k.key.publicKey, stored: k.stored };
 }
 
 export function generatePreKeys(
@@ -401,24 +420,26 @@ export function generatePreKeys(
   spkKeyId = 1,
   pqSpkKeyId = 1,
 ): DevicePreKeySet {
-  const spk = nacl.box.keyPair();
+  const slot = identity.secretKey.slot;
+  // Signed PreKey
+  const spk = freshPrekey(slot, 'x25519prekey');
   const signature = vault.sign(identity.signingSecretKey, spk.publicKey);
 
   // Signed PQ PreKey (ML-KEM-768), signed with the SAME Ed25519 identity key.
-  const pq = ml_kem768.keygen();
+  const pq = freshPrekey(slot, 'mlkem768');
   const pqSignature = vault.sign(identity.signingSecretKey, pq.publicKey);
 
   const oneTimePreKeys: { keyId: number; publicKeyB64: string }[] = [];
-  const opkSecrets = new Map<number, Uint8Array>();
+  const opkSecrets = new Map<number, string>();
 
   for (let i = 0; i < count; i++) {
-    const opk = nacl.box.keyPair();
+    const opk = freshPrekey(slot, 'x25519prekey');
     const keyId = startOpkId + i;
     oneTimePreKeys.push({
       keyId,
-      publicKeyB64: encodeBase64(opk.publicKey),
+      publicKeyB64: encodeBase64(opk.publicKey)
     });
-    opkSecrets.set(keyId, opk.secretKey);
+    opkSecrets.set(keyId, opk.stored);
   }
 
   return {
@@ -426,7 +447,7 @@ export function generatePreKeys(
       keyId: spkKeyId,
       publicKeyB64: encodeBase64(spk.publicKey),
       signatureB64: encodeBase64(signature),
-      secretKey: spk.secretKey,
+      secretStored: spk.stored,
     },
     oneTimePreKeys,
     opkSecrets,
@@ -434,7 +455,28 @@ export function generatePreKeys(
       keyId: pqSpkKeyId,
       publicKeyB64: encodeBase64(pq.publicKey),
       signatureB64: encodeBase64(pqSignature),
-      secretKey: pq.secretKey,
+      secretStored: pq.stored,
     },
   };
 }
+
+/**
+ * The raw SPK secret (base64) of a persisted SPK, for the user's OWN linked
+ * devices only: the SPK sync after a rotation (socket/client.ts), which boxes
+ * it to our own identity key right after. An
+ * explicit export (F-1b design doc §5); vaultExport.guard allowlists this file.
+ */
+export function exportSpkForLinkedDevice(slot: string, spkStored: string): string {
+  const { key } = vault.openStored(slot, 'x25519prekey', spkStored);
+  try {
+    const raw = vault.exportSecret(key, 'deviceSync');
+    try {
+      return encodeBase64(raw);
+    } finally {
+      raw.fill(0);
+    }
+  } finally {
+    vault.release(key);
+  }
+}
+

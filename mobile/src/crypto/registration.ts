@@ -4,7 +4,7 @@
  * Uploads the public identity profile and prekey bundle to the relay after
  * anonymous onboarding completes. NEVER uploads:
  *   - Identity.secretKey / signingSecretKey
- *   - PreKeySecrets.signedPreKey.secretKey
+ *   - PreKeySecrets.signedPreKey.secretStored (a vault blob, still never sent)
  *   - PreKeySecrets.opkSecrets values
  *
  * Privacy invariants:
@@ -383,10 +383,10 @@ function containsAnySecret(
   opks: OneTimePreKeyPublic[],
 ): boolean {
   const spkAny = spk as unknown as Record<string, unknown>;
-  if ('secretKey' in spkAny || 'secretKeyB64' in spkAny) return true;
+  if ('secretKey' in spkAny || 'secretKeyB64' in spkAny || 'secretStored' in spkAny) return true;
   for (const opk of opks) {
     const o = opk as unknown as Record<string, unknown>;
-    if ('secretKey' in o || 'secretKeyB64' in o) return true;
+    if ('secretKey' in o || 'secretKeyB64' in o || 'secretStored' in o) return true;
   }
   return false;
 }
@@ -414,7 +414,7 @@ async function persistPrekeySecretsDurably(
   preKeySecrets: PreKeySecrets,
 ): Promise<{ ok: boolean }> {
   const spkKeyId = preKeySecrets.signedPreKey.keyId;
-  const spkSecretB64 = encodeBase64(preKeySecrets.signedPreKey.secretKey);
+  const spkSecretB64 = preKeySecrets.signedPreKey.secretStored;
 
   const db = require('../db/local') as typeof import('../db/local');
 
@@ -448,9 +448,9 @@ async function persistPrekeySecretsDurably(
   } catch (e) {
     if (__DEV__) logger.warn('[registration] could not persist SPK createdAt to DB', e);
   }
-  for (const [keyId, secret] of preKeySecrets.opkSecrets.entries()) {
+  for (const [keyId, stored] of preKeySecrets.opkSecrets.entries()) {
     try {
-      await db.saveOpkSecret(keyId, encodeBase64(secret));
+      await db.saveOpkSecret(keyId, stored);
     } catch (e) {
       if (__DEV__) logger.warn('[registration] could not persist OPK secret to DB', keyId, e);
     }
@@ -467,8 +467,8 @@ async function persistPrekeySecretsDurably(
     await SecureStore.setItemAsync(keys.SECURE_SPK_SECRET_KEY(), spkSecretB64, secureOpts);
     await SecureStore.setItemAsync(keys.SECURE_SPK_KEYID_KEY(), String(spkKeyId), secureOpts);
 
-    for (const [keyId, secret] of preKeySecrets.opkSecrets.entries()) {
-      await SecureStore.setItemAsync(keys.opkSecretKey(keyId), encodeBase64(secret), secureOpts);
+    for (const [keyId, stored] of preKeySecrets.opkSecrets.entries()) {
+      await SecureStore.setItemAsync(keys.opkSecretKey(keyId), stored, secureOpts);
     }
     await SecureStore.setItemAsync(
       keys.SECURE_OPK_IDS_KEY(),

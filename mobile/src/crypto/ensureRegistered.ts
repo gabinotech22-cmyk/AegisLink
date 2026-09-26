@@ -93,7 +93,7 @@ export async function ensureRegistered(
     const result: RegistrationResult = await uploadIdentityAndPrekeys(
       identity,
       {
-        signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
+        signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretStored: preKeys.signedPreKey.secretStored },
         opkSecrets: preKeys.opkSecrets,
       },
       base,

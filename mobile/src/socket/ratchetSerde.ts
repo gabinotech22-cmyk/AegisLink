@@ -19,6 +19,7 @@
  */
 
 import type { RatchetState } from '../crypto/signal/ratchet';
+import { isVaultKey } from '../crypto/sodium/secretRef';
 
 export function isBufferShape(o: unknown): o is { type: 'Buffer'; data: number[] } {
   return (
@@ -86,6 +87,13 @@ export function reviveMkSkipped(raw: unknown): Map<string, Uint8Array> {
 
 /** Serialize the minimal next-state of a ratchet session for persistence. */
 export function serializeRatchetState(state: RatchetState): string {
+  // F-1b phase 2: a receiver's initial DH/PQ pair is its SPK/PQSPK as a vault
+  // handle, consumed by the first ratchet step. Such a state is never persisted
+  // (it is only saved after a successful decrypt); if one ever got here, fail
+  // closed instead of writing a meaningless handle as the session key.
+  if (isVaultKey(state.DHs.secretKey) || (state.PQs && isVaultKey(state.PQs.secretKey))) {
+    throw new Error('ratchetSerde: refusing to persist a session still holding a vault handle (before its first ratchet step)');
+  }
   return JSON.stringify({
     RK: state.RK,
     DHs: state.DHs,
