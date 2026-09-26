@@ -129,9 +129,8 @@ Both stores require a publicly accessible URL — not just a local file.
 static page generated 1:1 from `docs/privacy-policy.md` (keep both in sync in the same
 PR when the policy changes). Deployed by `infra/deploy-web.sh` alongside the landing.
 
-Action required: after merging a policy change, run the **Deploy web (manual)** workflow
-(`.github/workflows/deploy-web.yml`: `infra/deploy-web.sh` with the relay deploy's secrets,
-then a 200 check of every page) — or `infra/deploy-web.sh` locally — and smoke-test
+Action required: after merging a policy change, run `infra/deploy-web.sh` from the
+operator's machine (it needs the VM's SSH key, which stays off CI) and smoke-test
 `curl -s -o /dev/null -w '%{http_code}' https://aegis-link.it/privacy.html` (expect 200)
 before submitting to review. Use this exact URL in App Store Connect and Play Console.
 

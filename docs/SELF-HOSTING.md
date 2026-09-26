@@ -8,8 +8,7 @@
 > "¿Cómo monto mi propio relay?" con 3 pasos + enlace a la versión pública de
 > esta guía, **`https://aegis-link.it/selfhost.html`** (`web/selfhost.html`,
 > ES/EN/IT vía `web/lang.js`; la app la abre con `?lang=` en su idioma;
-> desplegada con el workflow manual **Deploy web** (`.github/workflows/deploy-web.yml` →
-> `infra/deploy-web.sh`)). Si cambias los pasos aquí, cambia
+> desplegada por el operador con `infra/deploy-web.sh`). Si cambias los pasos aquí, cambia
 > también esa página y las claves `relaySettings.howTo*` de la app.
 
 ## Qué es (y qué no)
