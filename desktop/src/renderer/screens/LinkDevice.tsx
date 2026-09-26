@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 import { io, Socket } from 'socket.io-client';
 import { homeRelayBaseUrl } from '../net/homeRelay';
 import { identityFromStored } from '../crypto/identity';
+import { vault } from '../crypto/sodium/vault';
 import { saveSpkSecret, getOrCreateDeviceId } from '../socket/client';
 
 /** Label the relay stores for this desktop and the phone shows in its device list. */
@@ -163,13 +164,17 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
             spkId?: number;
             spkSecretB64?: string;
           };
+          // The received keys go straight into the vault (with the same
+          // integrity checks as a load) and persist as blobs (F-1b).
+          const slot = useIdentity.getState().activeSlotId || 'self';
+          await vault.unlock(slot);
           const newIdentity = identityFromStored({
             publicKeyB64: json.publicKeyB64,
-            secretKeyB64: json.secretKeyB64,
+            secretKeyStored: json.secretKeyB64,
             signingPublicKeyB64: json.signingPublicKeyB64,
-            signingSecretKeyB64: json.signingSecretKeyB64,
+            signingSecretKeyStored: json.signingSecretKeyB64,
             createdAt: Date.now()
-          });
+          }, slot);
 
           // Trust the aegisId DERIVED from the transported pubkey, never the one
           // supplied alongside it. A mismatch means a corrupt/tampered transfer —

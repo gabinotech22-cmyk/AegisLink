@@ -127,7 +127,9 @@ jest.mock('../../crypto/backup', () => ({
 jest.mock('../../crypto/wordlist', () => ({
   WORDLIST_256: Array.from({ length: 256 }, (_, i) => `w${i}`),
 }));
-jest.mock('../../crypto/identity', () => ({ identityFromStored: jest.fn() }));
+jest.mock('../../crypto/identity', () => ({ ...jest.requireActual('../../crypto/identity'), identityFromStored: jest.fn() }));
+// The identity's X25519 secret is bytes 0..31, so the phrase is "w0 w1 … w31".
+const mockPhraseKey = (): unknown => require('../../crypto/__tests__/helpers/rawIdentity').vk(Uint8Array.from({ length: 32 }, (_, i) => i));
 jest.mock('../../db/local', () => ({ saveIdentity: jest.fn(), saveContact: jest.fn(), saveGroup: jest.fn(), saveMessage: jest.fn(), loadMessagesByChat: jest.fn().mockResolvedValue([{ id: 'm1', chatId: 'c1', direction: 'in', body: 'hola', createdAt: 1 }]) }));
 
 // ── stores ──────────────────────────────────────────────────────────────────
@@ -142,10 +144,8 @@ const mockIdentityValue: {
   identity: {
     aegisId: 'AEGIS-7QX',
     publicKeyB64: 'pub',
-    secretKey: new Uint8Array([0, 1, 2]),
-    secretKeyB64: 'sec',
+    secretKey: null,
     signingPublicKeyB64: 'spub',
-    signingSecretKeyB64: 'ssec',
     createdAt: 1_700_000_000_000,
   },
   displayName: 'Alice',
@@ -172,8 +172,8 @@ describe('BackupScreen', () => {
     jest.clearAllMocks();
     mockEncryptBackup.mockResolvedValue({ v: 1, ct: 'cipher' });
     mockIdentityValue.identity = {
-      aegisId: 'AEGIS-7QX', publicKeyB64: 'pub', secretKey: new Uint8Array([0, 1, 2]),
-      secretKeyB64: 'sec', signingPublicKeyB64: 'spub', signingSecretKeyB64: 'ssec',
+      aegisId: 'AEGIS-7QX', publicKeyB64: 'pub', secretKey: mockPhraseKey(),
+      signingPublicKeyB64: 'spub', signingSecretKey: require('../../crypto/__tests__/helpers/rawIdentity').testSignKey(),
       createdAt: 1_700_000_000_000,
     };
   });
@@ -189,10 +189,11 @@ describe('BackupScreen', () => {
 
   it('masks the recovery phrase until revealed', () => {
     const { getByText, queryByText } = render(<BackupScreen onBack={jest.fn()} />);
-    // masked initially — derived mnemonic words are not shown
-    expect(queryByText('w0 w1 w2')).toBeNull();
+    const phrase = Array.from({ length: 32 }, (_, i) => `w${i}`).join(' ');
+    // masked initially — derived mnemonic words are not shown (nor exported from the vault)
+    expect(queryByText(phrase)).toBeNull();
     fireEvent.press(getByText('backup.reveal'));
-    expect(getByText('w0 w1 w2')).toBeTruthy();
+    expect(getByText(phrase)).toBeTruthy();
   });
 
   it('warns when creating a backup with no identity', () => {

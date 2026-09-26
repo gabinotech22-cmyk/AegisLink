@@ -1,4 +1,5 @@
 import { nacl } from './sodium';
+import { vault, type VaultKey } from './sodium/vault';
 import { decodeUTF8, encodeUTF8, decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { ratchetEncrypt, ratchetDecrypt, type RatchetState } from './signal/ratchet';
 import { stripAndPad, unpad } from './metadata';
@@ -80,7 +81,7 @@ export function encryptMessage(
   plaintext: string,
   senderAegisId: string,
   recipientPublicKey: Uint8Array,
-  mySecretKey: Uint8Array,
+  mySecretKey: VaultKey,
   ratchetState: RatchetState
 ): { envelope: EncryptedEnvelope; newState: RatchetState } {
   // 1. Encrypt via Double Ratchet
@@ -110,7 +111,7 @@ export function encryptMessage(
   const innerBytes = stripAndPad(innerPayload);
 
   const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
-  const outerCiphertext = nacl.box(innerBytes, outerNonce, recipientPublicKey, mySecretKey);
+  const outerCiphertext = vault.box(mySecretKey, innerBytes, outerNonce, recipientPublicKey);
 
   const newState = { ...ratchetState };
   delete newState.x3dhInit;
@@ -127,7 +128,7 @@ export function encryptMessage(
 export function openEnvelope(
   envelope: EncryptedEnvelope,
   senderPublicKey: Uint8Array,
-  mySecretKey: Uint8Array
+  mySecretKey: VaultKey
 ): InnerPayload | null {
   let ciphertext: Uint8Array;
   let nonce: Uint8Array;
@@ -139,7 +140,7 @@ export function openEnvelope(
   }
   if (nonce.length !== nacl.box.nonceLength) return null;
 
-  const opened = nacl.box.open(ciphertext, nonce, senderPublicKey, mySecretKey);
+  const opened = vault.boxOpen(mySecretKey, ciphertext, nonce, senderPublicKey);
   if (!opened) return null;
 
   const parsed = unpad(opened);
@@ -152,7 +153,7 @@ export function openEnvelope(
 export function tryDecryptMessage(
   envelope: EncryptedEnvelope,
   senderPublicKey: Uint8Array,
-  mySecretKey: Uint8Array,
+  mySecretKey: VaultKey,
   ratchetState: RatchetState
 ): DecryptedInner | null {
   const parsed = openEnvelope(envelope, senderPublicKey, mySecretKey);
@@ -195,7 +196,7 @@ export function tryDecryptMessage(
 
 /**
  * Encrypt for an established contact using the sealed-sender v2 outer envelope.
- * @param senderSigningSecretKey the sender's 64-byte Ed25519 secret (signs the
+ * @param senderSigningSecretKey the sender's Ed25519 identity key (vault handle; signs the
  *        sealed inner so the recipient can authenticate `from`).
  * @param nowMs current time (ms) stamped inside the sealed envelope.
  */
@@ -203,7 +204,7 @@ export function encryptMessageV2(
   plaintext: string,
   senderAegisId: string,
   recipientPublicKey: Uint8Array,
-  senderSigningSecretKey: Uint8Array,
+  senderSigningSecretKey: VaultKey,
   ratchetState: RatchetState,
   nowMs: number,
   /** F3b: bootstrap a session across relays — includes x3dhInit + fc + spk. */
@@ -263,7 +264,7 @@ export function encryptMessageV2(
  */
 export function openEnvelopeV2(
   wire: SealedWire,
-  myBoxSecretKey: Uint8Array,
+  myBoxSecretKey: VaultKey,
   resolveSigningKey: (from: string) => Uint8Array | null,
   nowMs: number,
   /** F3b: accept a first-contact envelope from an unknown sender (TOFU). */
@@ -294,7 +295,7 @@ export function openEnvelopeV2(
 
 export function decryptMessageV2(
   wire: SealedWire,
-  myBoxSecretKey: Uint8Array,
+  myBoxSecretKey: VaultKey,
   resolveSigningKey: (from: string) => Uint8Array | null,
   ratchetState: RatchetState,
   nowMs: number,

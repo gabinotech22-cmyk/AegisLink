@@ -16,10 +16,10 @@ import { usePreferences } from '../store/preferences';
 import { useContacts } from '../store/contacts';
 import { useGroups } from '../store/groups';
 import { WORDLIST_256 } from '../crypto/wordlist';
-import { identityFromStored } from '../crypto/identity';
+import { exportIdentitySecrets, identityFromStored, importIdentity, type Identity } from '../crypto/identity';
+import { vault } from '../crypto/sodium/vault';
 import { saveIdentity, saveContact, saveGroup, saveMessage, loadMessagesByChat, type StoredContact, type StoredGroup, type StoredMessage } from '../db/local';
 import { encodeBase64 } from 'tweetnacl-util';
-import { nacl } from '../crypto/sodium';
 import {
   encryptBackup,
   decryptBackup,
@@ -84,13 +84,31 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     ? i18nT('backup.activeMinAgo', { count: Math.max(1, Math.floor((Date.now() - lastBackupAt) / 60000)) })
     : i18nT('backup.noBackupYet');
 
-  const secretKey = identity?.secretKey;
+  // The recovery phrase IS the identity key: an explicit export (F-1b design
+  // doc §5), taken out of the vault only while the user has it revealed.
+  const boxKey = identity?.secretKey;
   const mnemonic = useMemo<string>(() => {
-    if (!secretKey) return '';
-    return Array.from(secretKey).map((b) => WORDLIST_256[b]).join(' ');
-  }, [secretKey]);
+    if (!boxKey || !revealed) return '';
+    const secret = vault.exportSecret(boxKey);
+    try {
+      return Array.from(secret).map((b) => WORDLIST_256[b]).join(' ');
+    } finally {
+      secret.fill(0);
+    }
+  }, [boxKey, revealed]);
 
   const strength: PassphraseStrength = ratePassphrase(passphrase);
+
+  async function persistIdentity(restored: Identity): Promise<void> {
+    await saveIdentity({
+      aegisId: restored.aegisId,
+      publicKeyB64: restored.publicKeyB64,
+      secretKeyStored: restored.secretKeyStored,
+      signingPublicKeyB64: restored.signingPublicKeyB64,
+      signingSecretKeyStored: restored.signingSecretKeyStored,
+      createdAt: restored.createdAt,
+    });
+  }
 
   function resetPassphrase(): void {
     setPassphrase('');
@@ -104,6 +122,13 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   async function buildPayload(): Promise<BackupPayload> {
     if (!identity) throw new Error('No identity loaded');
     const messages = await collectMessages();
+    // Explicit export (F-1b design doc §5): the backup carries the identity
+    // keys, sealed right after under the passphrase. The raw copies are zeroed.
+    const secrets = exportIdentitySecrets(identity);
+    const secretKeyB64 = encodeBase64(secrets.secretKey);
+    const signingSecretKeyB64 = encodeBase64(secrets.signingSecretKey);
+    secrets.secretKey.fill(0);
+    secrets.signingSecretKey.fill(0);
     // Everything a restore needs to give the same account back: contacts with
     // every persisted field (nickname, own relay, caps, pinned/hidden…), the
     // groups with their signed governance, and the data preferences. The
@@ -114,9 +139,9 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       identity: {
         aegisId: identity.aegisId,
         publicKeyB64: identity.publicKeyB64,
-        secretKeyB64: identity.secretKeyB64,
+        secretKeyB64,
         signingPublicKeyB64: identity.signingPublicKeyB64,
-        signingSecretKeyB64: identity.signingSecretKeyB64,
+        signingSecretKeyB64,
         createdAt: identity.createdAt,
       },
       profile: {
@@ -246,15 +271,17 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       // Wipe passphrase BEFORE touching storage.
       resetPassphrase();
 
-      // 1) Restore identity (SecureStore + SQLite).
-      await saveIdentity({
-        aegisId: payload.identity.aegisId,
+      // 1) Restore identity (SecureStore + SQLite): its keys go into the
+      //    vault (with the same integrity checks as a load) and persist as blobs.
+      const slot = useIdentity.getState().activeSlotId || 'self';
+      await vault.unlock(slot);
+      await persistIdentity(identityFromStored({
         publicKeyB64: payload.identity.publicKeyB64,
-        secretKeyB64: payload.identity.secretKeyB64,
+        secretKeyStored: payload.identity.secretKeyB64,
         signingPublicKeyB64: payload.identity.signingPublicKeyB64,
-        signingSecretKeyB64: payload.identity.signingSecretKeyB64,
+        signingSecretKeyStored: payload.identity.signingSecretKeyB64,
         createdAt: payload.identity.createdAt,
-      });
+      }, slot));
 
       // 2) Restore profile preferences.
       const p = payload.profile;
@@ -345,26 +372,11 @@ export function BackupScreen({ onBack, onRestored }: Props) {
         if (idx === -1) throw new Error(i18nT('backup.wordNotInDict', { word: w }));
         return idx;
       });
-      const secretKeyBytes = new Uint8Array(bytes);
-      const keypair = nacl.box.keyPair.fromSecretKey(secretKeyBytes);
-      const signKeys = nacl.sign.keyPair.fromSeed(secretKeyBytes);
-
-      const restored = identityFromStored({
-        publicKeyB64: encodeBase64(keypair.publicKey),
-        secretKeyB64: encodeBase64(keypair.secretKey),
-        signingPublicKeyB64: encodeBase64(signKeys.publicKey),
-        signingSecretKeyB64: encodeBase64(signKeys.secretKey),
-        createdAt: Date.now(),
-      });
-
-      await saveIdentity({
-        aegisId: restored.aegisId,
-        publicKeyB64: restored.publicKeyB64,
-        secretKeyB64: restored.secretKeyB64,
-        signingPublicKeyB64: restored.signingPublicKeyB64,
-        signingSecretKeyB64: restored.signingSecretKeyB64,
-        createdAt: restored.createdAt,
-      });
+      // The 32 words are the X25519 secret; the signing key derives from it.
+      const slot = useIdentity.getState().activeSlotId || 'self';
+      await vault.unlock(slot);
+      const restored = importIdentity(slot, new Uint8Array(bytes), null, Date.now());
+      await persistIdentity(restored);
 
       await hydrateIdentity();
       setRestoring(false);

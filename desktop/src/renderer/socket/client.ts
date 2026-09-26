@@ -15,6 +15,7 @@
 import { logger } from '../utils/logger';
 import { io, type Socket } from 'socket.io-client';
 import { nacl, sha256 } from '../crypto/sodium';
+import { vault, type VaultKey } from '../crypto/sodium/vault';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import { SEALED_TRANSPORT_VERSION, MAILBOX_ENABLED, FEDERATION } from '../config';
 import { encryptMessage, openEnvelope, encryptMessageV2, openEnvelopeV2, parseRatchetHeader } from '../crypto/messaging';
@@ -303,9 +304,9 @@ function canonicalGroupBytes(args: {
 
 function signGroupMetadata(
   args: { groupId: string; groupName: string; members: string[]; createdAt: number },
-  signingSecretKey: Uint8Array,
+  signingSecretKey: VaultKey,
 ): string {
-  const sig = nacl.sign.detached(canonicalGroupBytes(args), signingSecretKey);
+  const sig = vault.sign(signingSecretKey, canonicalGroupBytes(args));
   return encodeBase64(sig);
 }
 
@@ -340,9 +341,9 @@ function canonicalGroupDissolveBytes(args: { groupId: string; adminId: string; c
 
 export function signGroupDissolve(
   args: { groupId: string; adminId: string; createdAt: number },
-  signingSecretKey: Uint8Array,
+  signingSecretKey: VaultKey,
 ): string {
-  const sig = nacl.sign.detached(canonicalGroupDissolveBytes(args), signingSecretKey);
+  const sig = vault.sign(signingSecretKey, canonicalGroupDissolveBytes(args));
   return encodeBase64(sig);
 }
 
@@ -729,7 +730,7 @@ async function uploadPreKeys(identity: Identity) {
             const { stripAndPad } = require('../crypto/metadata') as typeof import('../crypto/metadata');
             const innerBytes = stripAndPad(innerPayload);
             const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
-            const outerCiphertext = nacl.box(innerBytes, outerNonce, identity.publicKey, identity.secretKey);
+            const outerCiphertext = vault.box(identity.secretKey, innerBytes, outerNonce, identity.publicKey);
             socket!.emit('envelope', {
               id: crypto.randomUUID(),
               to: identity.aegisId,
@@ -899,7 +900,7 @@ export function connect(identity: Identity): Socket {
       const ct = decodeBase64(chal.ciphertext);
       if (ephemeral.length !== nacl.box.publicKeyLength) throw new Error('bad ephemeral key');
       if (nonce.length !== nacl.box.nonceLength) throw new Error('bad nonce length');
-      const opened = nacl.box.open(ct, nonce, ephemeral, identity.secretKey);
+      const opened = vault.boxOpen(identity.secretKey, ct, nonce, ephemeral);
       if (!opened) throw new Error('challenge decrypt failed');
       socket!.emit('auth:response', { plain: encodeBase64(opened) });
     } catch (e) {
@@ -2347,7 +2348,7 @@ async function sendSelfCopy(
 
     const innerBytes = stripAndPad(innerPayload);
     const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
-    const outerCiphertext = nacl.box(innerBytes, outerNonce, identity.publicKey, identity.secretKey);
+    const outerCiphertext = vault.box(identity.secretKey, innerBytes, outerNonce, identity.publicKey);
 
     sock.emit('envelope', {
       id: crypto.randomUUID(),

@@ -288,7 +288,7 @@ jest.mock('../../store/identity', () => {
   // Chat.tsx calls: const { identity } = useIdentity()   (line 83)
   //            and: useIdentity.getState().reset()         (line 89)
   const mockHook = jest.fn(() => ({
-    identity: { aegisId: 'my-id', secretKey: new Uint8Array(32) },
+    identity: { aegisId: 'my-id', secretKey: require('../../crypto/__tests__/helpers/rawIdentity').testBoxKey() },
     displayName: 'Me',
   })) as jest.Mock & { getState: () => { reset: () => Promise<void> } };
   mockHook.getState = jest.fn(() => ({

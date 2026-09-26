@@ -17,7 +17,8 @@
  */
 
 import { create } from 'zustand';
-import { createIdentity, type Identity } from '../crypto/identity';
+import { createIdentity, moveIdentity, type Identity } from '../crypto/identity';
+import { vault } from '../crypto/sodium/vault';
 import { switchDbSlot, saveIdentity, deleteIdentitySlot, deleteDbSlot } from '../db/local';
 
 const secureStorage = () => window.aegis.secureStorage;
@@ -173,15 +174,22 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
   async createProfile(displayName, avatarColor, presetIdentity) {
     // Use the identity the wizard already previewed, so the AegisID and
     // identicon the user just looked at are the ones that get persisted.
-    const identity = presetIdentity ?? createIdentity();
-    const slotId = identity.aegisId;
+    // The profile's slot is its own AegisID, known only once the key exists:
+    // the identity is minted in the active profile's vault and copied into the
+    // new profile's (its blobs then load only there) — F-1b.
+    const activeVaultSlot = get().activeSlotId || 'self';
+    await vault.unlock(activeVaultSlot);
+    const draft = presetIdentity ?? createIdentity(activeVaultSlot);
+    const slotId = draft.aegisId;
+    await vault.unlock(slotId);
+    const identity = moveIdentity(draft, slotId);
     const finalName = displayName || identity.aegisId.slice(0, 8).toLowerCase();
     const prevSlot = get().activeSlotId;
 
     // Per-slot secrets first: switching into a slot whose keys are missing would
     // leave the app on an identity it cannot sign with.
-    await secureStorage().set(`aegis.${slotId}.secretKey.b64`, identity.secretKeyB64);
-    await secureStorage().set(`aegis.${slotId}.signSecretKey.b64`, identity.signingSecretKeyB64);
+    await secureStorage().set(`aegis.${slotId}.secretKey.b64`, identity.secretKeyStored);
+    await secureStorage().set(`aegis.${slotId}.signSecretKey.b64`, identity.signingSecretKeyStored);
     await secureStorage().set(`aegis.${slotId}.displayName`, finalName);
     await secureStorage().set(`aegis.${slotId}.avatarColor`, avatarColor);
 
@@ -207,9 +215,9 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
       await saveIdentity({
         aegisId: identity.aegisId,
         publicKeyB64: identity.publicKeyB64,
-        secretKeyB64: identity.secretKeyB64,
+        secretKeyStored: identity.secretKeyStored,
         signingPublicKeyB64: identity.signingPublicKeyB64,
-        signingSecretKeyB64: identity.signingSecretKeyB64,
+        signingSecretKeyStored: identity.signingSecretKeyStored,
         createdAt: identity.createdAt,
       });
     } catch (e) {

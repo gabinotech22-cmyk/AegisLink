@@ -1,6 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { logger } from '../utils/logger';
 import { nacl, ml_kem768, sha256 } from '../crypto/sodium';
+import { vault } from '../crypto/sodium/vault';
 import { secretB64Equals } from '../crypto/secretEquals';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
@@ -1034,7 +1035,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
           const { stripAndPad } = require('../crypto/metadata') as typeof import('../crypto/metadata');
           const innerBytes = stripAndPad(innerPayload);
           const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
-          const outerCiphertext = nacl.box(innerBytes, outerNonce, identity.publicKey, identity.secretKey);
+          const outerCiphertext = vault.box(identity.secretKey, innerBytes, outerNonce, identity.publicKey);
           socket!.emit('envelope', {
             id: Crypto.randomUUID(),
             to: identity.aegisId,
@@ -1434,7 +1435,7 @@ export function connect(identity: Identity): Socket {
       const ct = decodeBase64(chal.ciphertext);
       if (ephemeral.length !== nacl.box.publicKeyLength) throw new Error('bad ephemeral key');
       if (nonce.length !== nacl.box.nonceLength) throw new Error('bad nonce length');
-      const opened = nacl.box.open(ct, nonce, ephemeral, identity.secretKey);
+      const opened = vault.boxOpen(identity.secretKey, ct, nonce, ephemeral);
       if (!opened) throw new Error('challenge decrypt failed');
       socket!.emit('auth:response', { plain: encodeBase64(opened) });
     } catch (e) {
@@ -1748,7 +1749,7 @@ export function connect(identity: Identity): Socket {
           if (!candidate?.publicKeyB64) continue;
           const res = openSenderKeyDistribution(
             { ciphertextB64: dist.ciphertextB64, nonceB64: dist.nonceB64 },
-            identity.secretKeyB64,
+            identity.secretKey,
             candidate.publicKeyB64,
           );
           if (res && res.senderAegisId === memberId) {
@@ -1829,7 +1830,7 @@ export async function rekeyGroupAfterRemoval(
     newSenderKey,
     groupId,
     identity.aegisId,
-    identity.secretKeyB64,
+    identity.secretKey,
     recipients,
   );
   // Sealed sender (Phase 3b): NO senderAegisId on the wire — it is sealed inside
@@ -2972,7 +2973,7 @@ async function decryptAndAppendLocked(
               require('../crypto/channelKeyStore') as typeof import('../crypto/channelKeyStore');
             const opened = openSenderKeyDistribution(
               { ciphertextB64: dist.ciphertextB64, nonceB64: dist.nonceB64 },
-              identity.secretKeyB64,
+              identity.secretKey,
               contact.publicKeyB64,
             );
             if (opened && opened.senderAegisId === contact.aegisId) {
@@ -4406,7 +4407,7 @@ async function sendSelfCopy(
     const { stripAndPad } = require('../crypto/metadata') as typeof import('../crypto/metadata');
     const innerBytes = stripAndPad(innerPayload);
     const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
-    const outerCiphertext = nacl.box(innerBytes, outerNonce, identity.publicKey, identity.secretKey);
+    const outerCiphertext = vault.box(identity.secretKey, innerBytes, outerNonce, identity.publicKey);
 
     sock.emit('envelope', {
       id: Crypto.randomUUID(),

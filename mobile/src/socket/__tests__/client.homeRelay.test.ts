@@ -229,24 +229,14 @@ jest.mock('socket.io-client', () => ({
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import type { Identity } from '../../crypto/identity';
+import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
 
 const MINE = 'm'.repeat(56) + '.onion';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return {
-    aegisId: 'AEGIS' + encodeBase64(box.publicKey).slice(0, 6),
-    publicKey: box.publicKey,
-    secretKey: box.secretKey,
-    publicKeyB64: encodeBase64(box.publicKey),
-    secretKeyB64: encodeBase64(box.secretKey),
-    signingPublicKey: sign.publicKey,
-    signingSecretKey: sign.secretKey,
-    signingPublicKeyB64: encodeBase64(sign.publicKey),
-    signingSecretKeyB64: encodeBase64(sign.secretKey),
-    createdAt: Date.now(),
-  } as Identity;
+  return identityFromRaw(box, sign, 'AEGIS' + encodeBase64(box.publicKey).slice(0, 6));
 }
 
 describe('Tor always-on — identity socket (official onion and self-hosted home)', () => {

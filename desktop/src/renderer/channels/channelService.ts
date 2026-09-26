@@ -23,6 +23,7 @@
  */
 
 import { nacl } from '../crypto/sodium';
+import type { VaultKey } from '../crypto/sodium/vault';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import {
   openChannelPost,
@@ -333,7 +334,7 @@ export function buildAndSealPost(
   channelId: string,
   params: OutgoingPostParams,
   head: ChainHead | null,
-  senderEd25519Secret: Uint8Array,
+  senderEd25519Secret: VaultKey,
   cek: Uint8Array,
 ): SealedOutgoingPost {
   const seqNum = head ? head.seqNum + 1 : 0;

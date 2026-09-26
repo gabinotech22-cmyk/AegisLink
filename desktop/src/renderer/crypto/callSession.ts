@@ -18,6 +18,7 @@
  */
 
 import { nacl } from './sodium';
+import type { VaultKey } from './sodium/vault';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { sealEnvelope, openEnvelope, type SealedWire } from './sealedSender';
 
@@ -60,7 +61,7 @@ interface CallHandshakeInner {
 export function sealCallInvite(
   recipientBoxPublicKey: Uint8Array,
   callerAegisId: string,
-  callerSigningSecretKey: Uint8Array,
+  callerSigningSecretKey: VaultKey,
   offer: string,
   nowMs: number,
   /**
@@ -98,7 +99,7 @@ export function sealCallInvite(
  */
 export function openCallInvite(
   wire: SealedWire,
-  myBoxSecretKey: Uint8Array,
+  myBoxSecretKey: VaultKey,
   resolveSigningKey: (from: string) => Uint8Array | null,
   nowMs: number,
 ): OpenedCallInvite | null {

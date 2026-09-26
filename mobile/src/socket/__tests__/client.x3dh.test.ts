@@ -166,31 +166,22 @@ jest.mock('socket.io-client', () => ({
 // Helpers
 
 import type { Identity } from '../../crypto/identity';
+import { vault, type VaultKey } from '../../crypto/sodium/vault';
+import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return {
-    aegisId: 'AEGIS' + encodeBase64(box.publicKey).slice(0, 6),
-    publicKey: box.publicKey,
-    secretKey: box.secretKey,
-    publicKeyB64: encodeBase64(box.publicKey),
-    secretKeyB64: encodeBase64(box.secretKey),
-    signingPublicKey: sign.publicKey,
-    signingSecretKey: sign.secretKey,
-    signingPublicKeyB64: encodeBase64(sign.publicKey),
-    signingSecretKeyB64: encodeBase64(sign.secretKey),
-    createdAt: Date.now(),
-  };
+  return identityFromRaw(box, sign, 'AEGIS' + encodeBase64(box.publicKey).slice(0, 6));
 }
 
 function buildBundle(
   contactBoxPub: Uint8Array,
-  contactSignSec: Uint8Array,
+  contactSignSec: VaultKey,
   contactSignPubB64: string,
 ) {
   const spk = nacl.box.keyPair();
-  const signature = nacl.sign.detached(spk.publicKey, contactSignSec);
+  const signature = vault.sign(contactSignSec, spk.publicKey);
   const opk = nacl.box.keyPair();
   return {
     identityKeyB64: encodeBase64(contactBoxPub),

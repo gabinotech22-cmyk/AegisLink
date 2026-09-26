@@ -10,6 +10,7 @@
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { openChannelPost, sealChannelPost, type ChannelPostInner } from '../publicChannelKey';
+import { vk } from './helpers/rawIdentity';
 
 const channelId = encodeBase64(nacl.randomBytes(16));
 const cek = nacl.randomBytes(32);
@@ -38,7 +39,7 @@ describe('openChannelPost on malformed sealed posts', () => {
       from: 'AAA-1111-2222', body: 'hi', ts: 1700000000000, seqNum: 1,
       prevHash: new Uint8Array(32), ttlMs: 0, attachmentsHash: new Uint8Array(32),
     };
-    const sealed = sealChannelPost(channelId, post, signer.secretKey, cek);
+    const sealed = sealChannelPost(channelId, post, vk(signer.secretKey), cek);
     expect(openChannelPost(channelId, sealed.ciphertextB64, sealed.nonceB64, cek, resolve)?.post.body).toBe('hi');
   });
 

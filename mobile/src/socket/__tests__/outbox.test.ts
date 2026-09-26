@@ -234,19 +234,17 @@ jest.mock('../../config', () => ({
 
 import { sendMessage, sendGroupMessage, retryFailedMessage, settleOrphanedPendingOnce, ORPHANED_PENDING_MIN_AGE_MS, syncNow } from '../client';
 import type { Identity } from '../../crypto/identity';
+import { stubKeys } from '../../crypto/__tests__/helpers/rawIdentity';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const BASE_IDENTITY: Identity = {
   aegisId: 'self-id',
   publicKey: new Uint8Array(32),
-  secretKey: new Uint8Array(32),
+  ...stubKeys(),
   publicKeyB64: 'c2VsZlB1Yg==',
-  secretKeyB64: 'c2VsZlNlYw==',
   signingPublicKey: new Uint8Array(32),
-  signingSecretKey: new Uint8Array(64),
   signingPublicKeyB64: 'c2lnUHVi',
-  signingSecretKeyB64: 'c2lnU2Vj',
   createdAt: 0,
 };
 

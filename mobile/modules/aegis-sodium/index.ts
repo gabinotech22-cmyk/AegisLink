@@ -55,12 +55,14 @@ export interface AegisSodiumNative {
   vaultImport(handle: B, blob: B, pub: B, slot: B, type: number, raw: B): number;
   vaultLoad(handle: B, type: B, pub: B, slot: B, blob: B): number;
   vaultDeriveEd25519(handle: B, blob: B, pub: B, xhandle: B): number;
+  vaultCopy(handle: B, blob: B, src: B, slot: B): number;
   vaultRelease(handle: B): number;
   vaultSign(handle: B, sig: B, m: B): number;
   vaultScalarmult(handle: B, q: B, p: B): number;
   vaultBox(handle: B, c: B, m: B, n: B, pk: B): number;
   vaultBoxOpen(handle: B, m: B, c: B, n: B, pk: B): number;
   vaultMlkem768Dec(handle: B, ss: B, ct: B): number;
+  vaultExport(handle: B, type: number, out: B): number;
   vaultLiveKeys(): number;
   mlkem768Keypair(pk: B, sk: B): number;
   mlkem768SeedKeypair(pk: B, sk: B, seed: B): number;

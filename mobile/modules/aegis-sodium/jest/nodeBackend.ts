@@ -24,7 +24,7 @@ import { argon2id } from '@noble/hashes/argon2.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import sodium from 'sodium-native';
 import type { AegisSodiumNative } from '../index';
-import { makeNodeVault, type VaultMethods } from './nodeVault';
+import { makeNodeVault, type NodeVault } from './nodeVault';
 
 const OK = 0;
 const EVERIFY = 1;
@@ -80,7 +80,7 @@ function hsalsa20Zero(key: Uint8Array): Uint8Array {
   return out;
 }
 
-const base: Omit<AegisSodiumNative, keyof VaultMethods> = {
+const base: Omit<AegisSodiumNative, keyof NodeVault> = {
   init: () => OK,
   randombytes: (buf) => {
     if (!isBytes(buf)) return EBADLEN;
@@ -263,6 +263,15 @@ function leadingZeroBits(d: Uint8Array, bits: number): boolean {
   return bits % 8 === 0 || (d[full] & (0xff << (8 - (bits % 8)))) === 0;
 }
 
-const nodeBackend: AegisSodiumNative = { ...base, ...makeNodeVault(base) };
+// One vault per test file, like the native module's process-wide state: a
+// jest.resetModules() re-evaluates this file but must not forget the unlocked
+// profiles or the live keys that identities already hold handles to.
+const g = globalThis as { __aegisNodeVault?: NodeVault };
+const vaultImpl: NodeVault = (g.__aegisNodeVault ??= makeNodeVault(base));
+
+const nodeBackend: AegisSodiumNative = { ...base, ...vaultImpl };
+
+/** Test setup: unlock a profile synchronously (see jest/vaultSetup.ts). */
+export const unlockVaultNow = (slot: string): void => vaultImpl.unlockNow(slot);
 
 export default nodeBackend;

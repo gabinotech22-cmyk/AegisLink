@@ -28,6 +28,7 @@ import { describe, it, expect } from 'vitest';
 import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { signGroupDissolve, verifyGroupDissolve } from '../client';
+import { vk } from '../../crypto/__tests__/helpers/rawIdentity';
 
 function keypair() {
   const sign = nacl.sign.keyPair();
@@ -40,7 +41,7 @@ const CREATED_AT = 1_700_000_000_000;
 describe('desktop group dissolution — signGroupDissolve / verifyGroupDissolve', () => {
   it('a signature made by the real admin key verifies successfully', () => {
     const admin = keypair();
-    const sig = signGroupDissolve({ groupId: GROUP_ID, adminId: 'admin-id', createdAt: CREATED_AT }, admin.secretKey);
+    const sig = signGroupDissolve({ groupId: GROUP_ID, adminId: 'admin-id', createdAt: CREATED_AT }, vk(admin.secretKey));
 
     expect(
       verifyGroupDissolve({ groupId: GROUP_ID, adminId: 'admin-id', createdAt: CREATED_AT }, sig, admin.publicKeyB64),
@@ -53,7 +54,7 @@ describe('desktop group dissolution — signGroupDissolve / verifyGroupDissolve'
     // Impostor signs the exact same claimed bytes, but with their OWN key.
     const forgedSig = signGroupDissolve(
       { groupId: GROUP_ID, adminId: 'admin-id', createdAt: CREATED_AT },
-      impostor.secretKey,
+      vk(impostor.secretKey),
     );
 
     // Verifying against the REAL admin's public key must fail — this is the
@@ -69,7 +70,7 @@ describe('desktop group dissolution — signGroupDissolve / verifyGroupDissolve'
 
   it('rejects a signature replayed against a DIFFERENT groupId', () => {
     const admin = keypair();
-    const sig = signGroupDissolve({ groupId: GROUP_ID, adminId: 'admin-id', createdAt: CREATED_AT }, admin.secretKey);
+    const sig = signGroupDissolve({ groupId: GROUP_ID, adminId: 'admin-id', createdAt: CREATED_AT }, vk(admin.secretKey));
 
     expect(
       verifyGroupDissolve(
@@ -82,7 +83,7 @@ describe('desktop group dissolution — signGroupDissolve / verifyGroupDissolve'
 
   it('rejects a signature whose adminId or createdAt was tampered with', () => {
     const admin = keypair();
-    const sig = signGroupDissolve({ groupId: GROUP_ID, adminId: 'admin-id', createdAt: CREATED_AT }, admin.secretKey);
+    const sig = signGroupDissolve({ groupId: GROUP_ID, adminId: 'admin-id', createdAt: CREATED_AT }, vk(admin.secretKey));
 
     expect(
       verifyGroupDissolve(

@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { ss } from '../utils/secureStore';
 import { nacl, type BoxKeyPair } from '../crypto/sodium';
+import { exportIdentitySecrets } from '../crypto/identity';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -186,17 +187,25 @@ export function DevicesScreen({ onBack }: Props) {
       const { loadLatestSpkSecret } = require('../db/prekeys');
       const latestSpk = await loadLatestSpkSecret();
 
-      plaintext = decodeUTF8(
-        JSON.stringify({
-          aegisId: identity.aegisId,
-          publicKeyB64: identity.publicKeyB64,
-          secretKeyB64: identity.secretKeyB64,
-          signingPublicKeyB64: identity.signingPublicKeyB64,
-          signingSecretKeyB64: identity.signingSecretKeyB64,
-          spkSecretB64: latestSpk?.b64,
-          spkId: latestSpk?.keyId,
-        }),
-      );
+      // Explicit export (F-1b design doc §5): linking hands the identity to
+      // the user's new device, boxed right below to its key. Raw copies zeroed.
+      const secrets = exportIdentitySecrets(identity);
+      try {
+        plaintext = decodeUTF8(
+          JSON.stringify({
+            aegisId: identity.aegisId,
+            publicKeyB64: identity.publicKeyB64,
+            secretKeyB64: encodeBase64(secrets.secretKey),
+            signingPublicKeyB64: identity.signingPublicKeyB64,
+            signingSecretKeyB64: encodeBase64(secrets.signingSecretKey),
+            spkSecretB64: latestSpk?.b64,
+            spkId: latestSpk?.keyId,
+          }),
+        );
+      } finally {
+        secrets.secretKey.fill(0);
+        secrets.signingSecretKey.fill(0);
+      }
 
       const nonce = nacl.randomBytes(nacl.box.nonceLength);
       const encrypted = nacl.box(plaintext, nonce, theirPubKey, myKeypair.secretKey);

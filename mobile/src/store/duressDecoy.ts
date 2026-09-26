@@ -19,7 +19,7 @@
  */
 import { logger } from '../utils/logger';
 import { ss } from '../utils/secureStore';
-import { createIdentity, type Identity } from '../crypto/identity';
+import { randomDecoyKeys } from '../crypto/identity';
 import { resolveActiveLocale, type SupportedLocale } from '../i18n';
 import type { StoredContact } from '../db/local';
 import type { StoredMessage } from '../db/local';
@@ -93,15 +93,11 @@ const DECOY_SCRIPTS_BY_LOCALE: Record<SupportedLocale, string[][]> = {
 function buildDecoyIdentity(): DecoyIdentity {
   // Real, cryptographically random key material — never all-zero. Forensic
   // analysis must not be able to distinguish this from a genuine identity.
-  const identity: Identity = createIdentity();
+  const identity = randomDecoyKeys();
   const displayName = identity.aegisId.toLowerCase().replace(/-/g, '').slice(0, 12);
   return {
-    aegisId: identity.aegisId,
-    publicKeyB64: identity.publicKeyB64,
-    secretKeyB64: identity.secretKeyB64,
-    signingPublicKeyB64: identity.signingPublicKeyB64,
-    signingSecretKeyB64: identity.signingSecretKeyB64,
-    createdAt: identity.createdAt,
+    ...identity,
+    createdAt: Date.now(),
     displayName,
     avatarColor: '#5bf2b9',
   };
@@ -117,7 +113,7 @@ function buildDecoyContactsAndMessages(
 
   DECOY_NAMES.forEach((person, i) => {
     // Plausible-looking but fake AegisID-shaped identifier for the decoy peer.
-    const fakeIdentity = createIdentity();
+    const fakeIdentity = randomDecoyKeys();
     const aegisId = fakeIdentity.aegisId;
     const addedAt = now - (30 + i * 5) * DAY_MS;
 

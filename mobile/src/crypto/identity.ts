@@ -1,7 +1,6 @@
 import { nacl } from './sodium';
+import { vault, type VaultKey, type VaultKeyType } from './sodium/vault';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import * as SecureStore from 'expo-secure-store';
-import { signSecretKeySlot } from './types';
 import { deriveAegisId } from './aegisId';
 
 // Re-exported for backward compatibility: deriveAegisId now lives in the pure
@@ -15,98 +14,111 @@ export interface KeyPair {
   secretKey: Uint8Array;
 }
 
+/**
+ * The user's long-term identity. Its private keys live in the key vault (F-1b,
+ * docs/F1B-KEY-VAULT-DESIGN.md): `secretKey` and `signingSecretKey` are vault
+ * handles, never bytes, so the secrets do not exist in JavaScript. Operations
+ * go through `vault.scalarMult/box/boxOpen` (X25519) and `vault.sign`
+ * (Ed25519). What persists is `secretKeyStored` / `signingSecretKeyStored`:
+ * the keys wrapped under the profile's KEK (see `toStored`).
+ */
 export interface Identity {
   aegisId: string;
   publicKey: Uint8Array;
-  secretKey: Uint8Array;
   publicKeyB64: string;
-  secretKeyB64: string;
+  /** X25519 identity key (vault handle). */
+  secretKey: VaultKey;
   signingPublicKey: Uint8Array;
-  signingSecretKey: Uint8Array;
   signingPublicKeyB64: string;
-  signingSecretKeyB64: string;
+  /** Ed25519 identity key (vault handle). */
+  signingSecretKey: VaultKey;
+  /** Persisted form of `secretKey`: a vault blob of this profile. */
+  secretKeyStored: string;
+  /** Persisted form of `signingSecretKey`. */
+  signingSecretKeyStored: string;
   createdAt: number;
 }
 
-export function generateKeyPair(): KeyPair {
-  return nacl.box.keyPair();
-}
+/**
+ * Persisted key: "vault1:" + base64(blob). A value without the prefix is a raw
+ * key stored before F-1b (base64), migrated on load.
+ */
+const STORED_PREFIX = 'vault1:';
 
-export function createIdentity(): Identity {
-  const { publicKey, secretKey } = generateKeyPair();
-  // Derive signing key from box secret key so a 32-word mnemonic fully restores the identity.
-  const signKeys = nacl.sign.keyPair.fromSeed(secretKey);
+export const isVaultStored = (stored: string): boolean => stored.startsWith(STORED_PREFIX);
+const toStored = (blob: Uint8Array): string => STORED_PREFIX + encodeBase64(blob);
+
+function build(key: VaultKey, keyBlob: Uint8Array, sign: VaultKey, signBlob: Uint8Array, createdAt: number): Identity {
   return {
-    aegisId: deriveAegisId(publicKey),
-    publicKey,
-    secretKey,
-    publicKeyB64: encodeBase64(publicKey),
-    secretKeyB64: encodeBase64(secretKey),
-    signingPublicKey: signKeys.publicKey,
-    signingSecretKey: signKeys.secretKey,
-    signingPublicKeyB64: encodeBase64(signKeys.publicKey),
-    signingSecretKeyB64: encodeBase64(signKeys.secretKey),
-    createdAt: Date.now(),
+    aegisId: deriveAegisId(key.publicKey),
+    publicKey: key.publicKey,
+    publicKeyB64: encodeBase64(key.publicKey),
+    secretKey: key,
+    signingPublicKey: sign.publicKey,
+    signingPublicKeyB64: encodeBase64(sign.publicKey),
+    signingSecretKey: sign,
+    secretKeyStored: toStored(keyBlob),
+    signingSecretKeyStored: toStored(signBlob),
+    createdAt,
   };
 }
 
-// ── Web3 integration helpers ─────────────────────────────────────────────────
-// These functions access SecureStore directly so the private key never leaves
-// the device's secure enclave. `profileId` is the slot id of the profile
-// ('self' for the primary profile, or e.g. 'work' / 'slot_1' for others).
+/**
+ * A new identity in profile `slot` (unlocked). The signing key is derived from
+ * the box secret (sign.keyPair.fromSeed) so a 32-word mnemonic fully restores
+ * the identity — inside the vault, like everything else.
+ */
+export function createIdentity(slot = 'self'): Identity {
+  const x = vault.generate(slot, 'x25519');
+  const e = vault.deriveEd25519(x.key);
+  return build(x.key, x.blob, e.key, e.blob, Date.now());
+}
 
 /**
- * Loads the 64-byte Ed25519 signing secret key for the given profile/slot.
- *
- * Per-profile isolation: the slot name is derived from `profileId` via the
- * single source of truth in crypto/types. The primary profile ('self') maps to
- * the legacy un-suffixed slot (SLOT_KEY_PREFIX.SIGN_SECRET), so existing
- * identities created before multi-profile support keep working with zero
- * migration. Non-'self' profiles use their own suffixed slot and NEVER read the
- * primary's legacy key — doing so would break isolation and let one profile
- * sign with another's identity.
- *
- * The secret never leaves SecureStore except as the in-memory Uint8Array the
- * caller needs to sign with.
+ * Take raw identity keys into the vault: backup restore, recovery phrase,
+ * device link, and the one-time migration of keys stored before F-1b. The
+ * caller's copies are zeroed. Without a signing key it is derived from the box
+ * secret, exactly as createIdentity does.
  */
-async function loadSignSecret(profileId: string): Promise<Uint8Array> {
-  const slot = signSecretKeySlot(profileId);
-  // For 'self', slot === SLOT_KEY_PREFIX.SIGN_SECRET (the legacy name), so the
-  // primary profile is read in place with no migration step required.
-  const signSecretB64 = await SecureStore.getItemAsync(slot);
-
-  if (!signSecretB64) {
-    throw new Error(`no signing key in SecureStore for profile ${profileId}`);
+export function importIdentity(slot: string, boxSecret: Uint8Array, signSecret: Uint8Array | null, createdAt: number): Identity {
+  try {
+    const x = vault.import(slot, 'x25519', boxSecret);
+    let e: { key: VaultKey; blob: Uint8Array };
+    try {
+      e = signSecret ? vault.import(slot, 'ed25519', signSecret) : vault.deriveEd25519(x.key);
+    } catch (err) {
+      vault.release(x.key);
+      throw err;
+    }
+    return build(x.key, x.blob, e.key, e.blob, createdAt);
+  } finally {
+    boxSecret.fill(0);
+    signSecret?.fill(0);
   }
-  return decodeBase64(signSecretB64);
+}
+
+/** The same identity as a key set of profile `slot` (unlocked); the original handles are released. */
+export function moveIdentity(identity: Identity, slot: string): Identity {
+  if (identity.secretKey.slot === slot) return identity;
+  const x = vault.copy(identity.secretKey, slot);
+  const e = vault.copy(identity.signingSecretKey, slot);
+  vault.release(identity.secretKey);
+  vault.release(identity.signingSecretKey);
+  return build(x.key, x.blob, e.key, e.blob, identity.createdAt);
 }
 
 /**
- * Returns the 32-byte Ed25519 signing public key for the given profile.
- * Derived from that profile's signing secret key (64 bytes = seed || pubkey).
+ * The raw identity secrets, for the explicit exports ONLY (design doc §5):
+ * encrypted backup, device link, recovery phrase. The caller zeroes both.
  */
-export async function getProfilePublicKey(profileId: string): Promise<Uint8Array> {
-  const signSecret = await loadSignSecret(profileId);
-  // nacl sign secret key is 64 bytes: first 32 are the seed, last 32 the public key.
-  return signSecret.slice(32, 64);
+export function exportIdentitySecrets(identity: Identity): { secretKey: Uint8Array; signingSecretKey: Uint8Array } {
+  return {
+    secretKey: vault.exportSecret(identity.secretKey),
+    signingSecretKey: vault.exportSecret(identity.signingSecretKey),
+  };
 }
 
-/**
- * Signs an arbitrary payload with the given profile's Ed25519 signing key.
- * Returns a 64-byte detached signature. The private key never leaves SecureStore.
- */
-export async function signWithProfileKey(
-  profileId: string,
-  payload: Uint8Array
-): Promise<Uint8Array> {
-  const signSecret = await loadSignSecret(profileId);
-  return nacl.sign.detached(payload, signSecret);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** XOR-accumulated constant-time comparison for secret/derived key material
- * (golden rule #8) — never early-return on the first mismatching byte. */
+/** XOR-accumulated constant-time comparison for key material (golden rule #8). */
 function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -114,71 +126,91 @@ function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-export function identityFromStored(opts: {
-  publicKeyB64: string;
-  secretKeyB64: string;
-  signingPublicKeyB64?: string;
-  signingSecretKeyB64?: string;
-  createdAt: number;
-}): Identity {
-  const publicKey = decodeBase64(opts.publicKeyB64);
-  const secretKey = decodeBase64(opts.secretKeyB64);
+/** A persisted key into a handle: a vault blob loads; a raw pre-F-1b key is imported (migration). */
+function openStored(slot: string, type: VaultKeyType, stored: string): { key: VaultKey; blob: Uint8Array } {
+  if (isVaultStored(stored)) {
+    const blob = decodeBase64(stored.slice(STORED_PREFIX.length));
+    return { key: vault.load(slot, blob), blob };
+  }
+  return vault.import(slot, type, decodeBase64(stored));
+}
 
-  // Integrity check: publicKeyB64 and secretKeyB64 are written to two
-  // different stores (SQLite vs SecureStore) by two separate operations in
-  // saveIdentity — if one write lands and the other fails/retries with a
-  // DIFFERENT keypair, the two halves silently stop matching. Every future
-  // encrypt/sign then fails against whatever the relay and contacts actually
-  // have on file (e.g. permanent 403 invalid_signature on prekey upload).
-  // Failing loudly here converts that into a clear, debuggable error instead
-  // of a perpetual silent failure (golden rule #1).
-  const derivedPublicKey = nacl.box.keyPair.fromSecretKey(secretKey).publicKey;
-  if (!constantTimeEqualBytes(derivedPublicKey, publicKey)) {
+/**
+ * The identity of profile `slot` (unlocked) from its persisted form. Keys
+ * stored before F-1b (raw base64) are imported into the vault here; the result
+ * then carries their blob form and the caller re-persists it when
+ * `secretKeyStored` / `signingSecretKeyStored` differ from what it loaded.
+ */
+export function identityFromStored(
+  opts: {
+    publicKeyB64: string;
+    secretKeyStored: string;
+    signingPublicKeyB64?: string;
+    signingSecretKeyStored?: string;
+    createdAt: number;
+  },
+  slot = 'self',
+): Identity {
+  const x = openStored(slot, 'x25519', opts.secretKeyStored);
+
+  // Integrity check: publicKeyB64 and the secret are written to two different
+  // stores (SQLite vs SecureStore) by two separate operations in saveIdentity —
+  // if one write lands and the other fails/retries with a DIFFERENT keypair,
+  // the two halves silently stop matching. Every future encrypt/sign then fails
+  // against whatever the relay and contacts actually have on file (e.g.
+  // permanent 403 invalid_signature on prekey upload). Failing loudly here
+  // converts that into a clear, debuggable error instead of a perpetual silent
+  // failure (golden rule #1). The vault computes the public half from the
+  // secret itself, so the comparison is against the real key.
+  if (!constantTimeEqualBytes(x.key.publicKey, decodeBase64(opts.publicKeyB64))) {
+    vault.release(x.key);
     throw new Error('identity corrupted: secretKey does not match publicKeyB64');
   }
 
   // Missing signing material (pre-multi-key DBs): DERIVE it deterministically
-  // from the box secret key, exactly as createIdentity does
-  // (nacl.sign.keyPair.fromSeed). A throwaway RANDOM pair would produce
-  // signatures no contact can verify (sealed-sender rejects everything) AND would
-  // mask a corrupted/half-written identity as valid. Deterministic derivation
-  // restores the user's REAL signing identity instead (golden rule #1/#3).
-  const signKeys = (opts.signingPublicKeyB64 && opts.signingSecretKeyB64)
-    ? {
-        publicKey: decodeBase64(opts.signingPublicKeyB64),
-        secretKey: decodeBase64(opts.signingSecretKeyB64)
+  // from the box secret key, exactly as createIdentity does. A throwaway RANDOM
+  // pair would produce signatures no contact can verify (sealed-sender rejects
+  // everything) AND would mask a corrupted/half-written identity as valid.
+  let e: { key: VaultKey; blob: Uint8Array };
+  if (opts.signingPublicKeyB64 && opts.signingSecretKeyStored) {
+    try {
+      e = openStored(slot, 'ed25519', opts.signingSecretKeyStored);
+    } catch (err) {
+      vault.release(x.key);
+      // Importing an Ed25519 secret checks that its embedded public half is
+      // the one its seed derives (sign.detached only ever uses the seed).
+      if (!isVaultStored(opts.signingSecretKeyStored)) {
+        throw new Error('identity corrupted: signingSecretKey does not match signingPublicKeyB64');
       }
-    : nacl.sign.keyPair.fromSeed(secretKey);
-
-  // Same integrity check for the signing keypair, but derived from the SEED
-  // (first 32 bytes), not just compared against the embedded public-key
-  // bytes (last 32). nacl.sign.detached() only ever uses the seed to compute
-  // the signature — the embedded public-key bytes are a convenience copy it
-  // never reads back. A secretKey whose embedded bytes were patched to match
-  // signingPublicKeyB64 while its seed stayed unrelated would have passed a
-  // bytes-only comparison yet still produce signatures that fail to verify —
-  // reintroducing exactly the silent-failure bug this check exists to catch.
-  // Deriving from the seed and comparing THAT public key closes the gap.
-  // Only applies when both were loaded explicitly — the derived branch above
-  // is correct by construction (fromSeed always returns a matching pair).
-  if (opts.signingPublicKeyB64 && opts.signingSecretKeyB64) {
-    const seed = signKeys.secretKey.slice(0, 32);
-    const derivedSigningPublicKey = nacl.sign.keyPair.fromSeed(seed).publicKey;
-    if (!constantTimeEqualBytes(derivedSigningPublicKey, signKeys.publicKey)) {
+      throw err;
+    }
+    // The vault's public half comes from the seed: a secret whose embedded
+    // bytes were patched to match signingPublicKeyB64 while its seed stayed
+    // unrelated cannot pass.
+    if (!constantTimeEqualBytes(e.key.publicKey, decodeBase64(opts.signingPublicKeyB64))) {
+      vault.release(x.key);
+      vault.release(e.key);
       throw new Error('identity corrupted: signingSecretKey does not match signingPublicKeyB64');
     }
+  } else {
+    e = vault.deriveEd25519(x.key);
   }
+  return build(x.key, x.blob, e.key, e.blob, opts.createdAt);
+}
 
+/**
+ * A throwaway random public identity (AegisID + keys) with raw key material,
+ * for the duress decoy only: its keys never authenticate anything and are not
+ * the user's, so they stay outside the vault.
+ */
+export function randomDecoyKeys(): { aegisId: string; publicKeyB64: string; secretKeyB64: string; signingPublicKeyB64: string; signingSecretKeyB64: string } {
+  const box = nacl.box.keyPair();
+  const sign = nacl.sign.keyPair.fromSeed(box.secretKey);
   return {
-    aegisId: deriveAegisId(publicKey),
-    publicKey,
-    secretKey,
-    publicKeyB64: opts.publicKeyB64,
-    secretKeyB64: opts.secretKeyB64,
-    signingPublicKey: signKeys.publicKey,
-    signingSecretKey: signKeys.secretKey,
-    signingPublicKeyB64: opts.signingPublicKeyB64 ?? encodeBase64(signKeys.publicKey),
-    signingSecretKeyB64: opts.signingSecretKeyB64 ?? encodeBase64(signKeys.secretKey),
-    createdAt: opts.createdAt,
+    aegisId: deriveAegisId(box.publicKey),
+    publicKeyB64: encodeBase64(box.publicKey),
+    secretKeyB64: encodeBase64(box.secretKey),
+    signingPublicKeyB64: encodeBase64(sign.publicKey),
+    signingSecretKeyB64: encodeBase64(sign.secretKey),
   };
 }

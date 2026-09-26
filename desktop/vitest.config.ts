@@ -27,6 +27,8 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+    // F-1b: the primary profile's key vault starts unlocked, as after hydrate.
+    setupFiles: ['src/renderer/crypto/__tests__/helpers/vaultSetup.ts'],
     // The crypto suites do real ML-KEM-768 keygen/encaps which is a touch slow
     // under coverage; keep a generous per-test timeout so CI never flakes.
     testTimeout: 20_000,

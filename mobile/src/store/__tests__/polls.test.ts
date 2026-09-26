@@ -18,6 +18,7 @@ import nacl from 'tweetnacl';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import { encryptMessage, openEnvelope } from '../../crypto/messaging';
 import { initRatchet, ratchetDecrypt, type RatchetState } from '../../crypto/signal/ratchet';
+import { vk } from '../../crypto/__tests__/helpers/rawIdentity';
 
 /**
  * Build a paired (Alice, Bob) ratchet using a known root key and Bob's SPK
@@ -61,7 +62,7 @@ function buildVoteWire(args: {
     payload,
     args.senderAegisId,
     args.recipientPublicKey,
-    args.senderSecretKey,
+    vk(args.senderSecretKey),
     args.ratchet,
   );
   const wire = {
@@ -181,7 +182,7 @@ describe('group vote wire format', () => {
     const opened = openEnvelope(
       { ciphertextB64: wire.ciphertext, nonceB64: wire.nonce },
       alice.publicKey,
-      bob.secretKey,
+      vk(bob.secretKey),
     );
     expect(opened).not.toBeNull();
     expect(opened!.from).toBe('alice');

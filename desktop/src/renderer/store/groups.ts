@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { nacl } from '../crypto/sodium';
+import { vault } from '../crypto/sodium/vault';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import {
   loadGroups,
@@ -34,14 +34,14 @@ async function signAsAdmin(group: StoredGroup): Promise<{ adminId: string; admin
   const { useIdentity } = await import('./identity');
   const id = useIdentity.getState().identity;
   if (!id) return null;
-  const sig = nacl.sign.detached(
+  const sig = vault.sign(
+    id.signingSecretKey,
     canonicalGroupBytes({
       groupId: group.id,
       groupName: group.name,
       members: group.members,
       createdAt: group.createdAt,
     }),
-    id.signingSecretKey,
   );
   return { adminId: id.aegisId, adminSig: encodeBase64(sig) };
 }

@@ -20,6 +20,8 @@ import { encodeBase64 } from 'tweetnacl-util';
 // Declared with the `mock` prefix so the hoisted jest.mock() factories below may
 // reference them. Populated in the top-level setup before any module loads them.
 const mockSelfKp = nacl.box.keyPair();
+// Our identity key as the app holds it: a vault handle (F-1b).
+const mockSelfKey = vk(mockSelfKp.secretKey);
 const mockPeerAKp = nacl.box.keyPair();
 const mockPeerBKp = nacl.box.keyPair();
 const mockHostKp = nacl.box.keyPair();
@@ -70,7 +72,7 @@ jest.mock('../../store/contacts', () => ({
 // ── store/identity — our real box secret key + aegisId ─────────────────────
 jest.mock('../../store/identity', () => ({
   useIdentity: {
-    getState: () => ({ identity: { aegisId: SELF, secretKey: mockSelfKp.secretKey } }),
+    getState: () => ({ identity: { aegisId: SELF, secretKey: mockSelfKey } }),
   },
 }));
 
@@ -109,6 +111,7 @@ import {
   startGroupCall,
   attachGroupCallHandlers,
 } from '../groupCalls';
+import { vk } from '../../crypto/__tests__/helpers/rawIdentity';
 
 // ── Test helpers ────────────────────────────────────────────────────────────
 
@@ -178,7 +181,7 @@ describe('groupCalls sealed-sender signaling', () => {
 
   it('startGroupCall returns early (no emit, no throw) when getSocket() is null', async () => {
     mockSocketReturnValue = null;
-    const identity = { aegisId: SELF, publicKeyB64: 'pk', secretKey: mockSelfKp.secretKey } as Parameters<typeof startGroupCall>[0];
+    const identity = { aegisId: SELF, publicKeyB64: 'pk', secretKey: mockSelfKey } as unknown as Parameters<typeof startGroupCall>[0];
     await expect(startGroupCall(identity, { id: 'g', name: 'G', members: [] }, [PEER_A])).resolves.toBeUndefined();
     expect(mockEmit).not.toHaveBeenCalled();
   });
@@ -228,7 +231,7 @@ describe('groupCalls sealed-sender signaling', () => {
 
   it('startGroupCall heartbeat seals the roster (no cleartext participants/groupName on the wire)', async () => {
     mockGroups = [{ id: 'g-hb', name: 'Heartbeat', members: [SELF, PEER_A, PEER_B] }];
-    const identity = { aegisId: SELF, publicKeyB64: 'pk', secretKey: mockSelfKp.secretKey } as Parameters<typeof startGroupCall>[0];
+    const identity = { aegisId: SELF, publicKeyB64: 'pk', secretKey: mockSelfKey } as unknown as Parameters<typeof startGroupCall>[0];
 
     await startGroupCall(identity, { id: 'g-hb', name: 'Heartbeat', members: [SELF, PEER_A, PEER_B] }, [PEER_A, PEER_B]);
 

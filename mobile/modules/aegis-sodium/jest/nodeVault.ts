@@ -32,14 +32,17 @@ type Prims = Pick<AegisSodiumNative, 'signDetached' | 'scalarmult' | 'boxEasy' |
 export type VaultMethods = Pick<
   AegisSodiumNative,
   | 'vaultUnlock' | 'vaultDestroyProfile' | 'vaultLock' | 'vaultLockAll' | 'vaultGenerate' | 'vaultImport'
-  | 'vaultLoad' | 'vaultDeriveEd25519' | 'vaultRelease' | 'vaultSign' | 'vaultScalarmult' | 'vaultBox'
-  | 'vaultBoxOpen' | 'vaultMlkem768Dec' | 'vaultLiveKeys'
+  | 'vaultLoad' | 'vaultDeriveEd25519' | 'vaultCopy' | 'vaultRelease' | 'vaultSign' | 'vaultScalarmult' | 'vaultBox'
+  | 'vaultBoxOpen' | 'vaultMlkem768Dec' | 'vaultExport' | 'vaultLiveKeys'
 >;
 
 const isBytes = (b: unknown): b is Uint8Array => b instanceof Uint8Array;
 const key = (slot: Uint8Array): string => Buffer.from(slot).toString('hex');
 
-export function makeNodeVault(p: Prims): VaultMethods {
+/** The vault plus a synchronous unlock for test setup (the native one is async only because it reads the OS keystore). */
+export type NodeVault = VaultMethods & { unlockNow(slot: string): void };
+
+export function makeNodeVault(p: Prims): NodeVault {
   const keystore = new Map<string, Uint8Array>(); // slot → KEK (the "OS store")
   const unlocked = new Map<string, Uint8Array>(); // slot → KEK in the vault
   const keys = new Map<number, { type: number; slot: string; secret: Uint8Array }>();
@@ -99,17 +102,20 @@ export function makeNodeVault(p: Prims): VaultMethods {
     unlocked.delete(k);
   }
 
+  function unlockNow(slot: string): void {
+    const s = slotName(slot);
+    let kek = keystore.get(key(s));
+    if (!kek) {
+      kek = new Uint8Array(32);
+      sodium.randombytes_buf(kek);
+      keystore.set(key(s), kek);
+    }
+    if (!unlocked.has(key(s))) unlocked.set(key(s), Uint8Array.from(kek));
+  }
+
   return {
-    vaultUnlock: async (slot) => {
-      const s = slotName(slot);
-      let kek = keystore.get(key(s));
-      if (!kek) {
-        kek = new Uint8Array(32);
-        sodium.randombytes_buf(kek);
-        keystore.set(key(s), kek);
-      }
-      if (!unlocked.has(key(s))) unlocked.set(key(s), Uint8Array.from(kek));
-    },
+    vaultUnlock: async (slot) => unlockNow(slot),
+    unlockNow,
     vaultDestroyProfile: async (slot) => {
       const k = key(slotName(slot));
       lockSlot(k);
@@ -187,6 +193,13 @@ export function makeNodeVault(p: Prims): VaultMethods {
       sk.fill(0);
       return rc;
     },
+    vaultCopy: (handle, blob, src, slot) => {
+      const id = readHandle(src);
+      if (id === null || !slotOk(slot) || !isBytes(handle) || handle.length !== 4) return EBADLEN;
+      const k = keys.get(id);
+      if (!k || !unlocked.has(key(slot))) return ENOKEY;
+      return addKey(handle, blob, new Uint8Array(PUB_LEN[k.type]), slot, k.type, k.secret);
+    },
     vaultRelease: (handle) => {
       const id = readHandle(handle);
       if (id === null) return EBADLEN;
@@ -201,6 +214,11 @@ export function makeNodeVault(p: Prims): VaultMethods {
     vaultBox: (handle, c, m, n, pk) => withKey(handle, X25519, (sk) => p.boxEasy(c, m, n, pk, sk)),
     vaultBoxOpen: (handle, m, c, n, pk) => withKey(handle, X25519, (sk) => p.boxOpenEasy(m, c, n, pk, sk)),
     vaultMlkem768Dec: (handle, ss, ct) => withKey(handle, MLKEM768, (sk) => p.mlkem768Dec(ss, ct, sk)),
+    vaultExport: (handle, type, out) => {
+      const len = KEY_LEN[type];
+      if (!len || !isBytes(out) || out.length !== len) return EBADLEN;
+      return withKey(handle, type, (sk) => { out.set(sk); return OK; });
+    },
     vaultLiveKeys: () => keys.size,
   };
 }

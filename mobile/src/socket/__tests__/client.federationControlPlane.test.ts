@@ -197,22 +197,13 @@ jest.mock('socket.io-client', () => ({
 }));
 
 import type { Identity } from '../../crypto/identity';
+import { vault } from '../../crypto/sodium/vault';
+import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return {
-    aegisId: deriveAegisId(box.publicKey), // real format: URL-safe, ID<->key bound
-    publicKey: box.publicKey,
-    secretKey: box.secretKey,
-    publicKeyB64: encodeBase64(box.publicKey),
-    secretKeyB64: encodeBase64(box.secretKey),
-    signingPublicKey: sign.publicKey,
-    signingSecretKey: sign.secretKey,
-    signingPublicKeyB64: encodeBase64(sign.publicKey),
-    signingSecretKeyB64: encodeBase64(sign.secretKey),
-    createdAt: Date.now(),
-  } as Identity;
+  return identityFromRaw(box, sign); // real AegisID format: URL-safe, ID<->key bound
 }
 
 /** Serialize a ratchet state into the persisted-session JSON shape. */
@@ -249,7 +240,7 @@ function establishSyncedSession(me: Identity, peer: Identity): RatchetState {
 
 function setPeerBundle(peer: Identity) {
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, peer.signingSecretKey);
+  const sig = vault.sign(peer.signingSecretKey, spk.publicKey);
   (mockFakeSocket as unknown as { nextBundle: unknown }).nextBundle = {
     identityKeyB64: peer.publicKeyB64,
     signingPublicKeyB64: peer.signingPublicKeyB64,
@@ -268,7 +259,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 
 function foreignPeerBundleVia(peer: Identity) {
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, peer.signingSecretKey);
+  const sig = vault.sign(peer.signingSecretKey, spk.publicKey);
   mockForeignRelayHttp.mockImplementation(async (_relay: unknown, path: unknown) => {
     if (String(path).startsWith('/prekeys/bundle/')) {
       return { status: 200, body: JSON.stringify({ bundle: {
@@ -454,7 +445,7 @@ describe('federation F3 — foreign contacts: sealed control plane + group re-ke
     const senderState = establishSyncedSession(me, peer);
 
     const sk = generateSenderKey();
-    const [box] = await sealSenderKeyForRecipients(sk, 'group-9', peer.aegisId, peer.secretKeyB64, [{ aegisId: me.aegisId, publicKeyB64: me.publicKeyB64 }]);
+    const [box] = await sealSenderKeyForRecipients(sk, 'group-9', peer.aegisId, peer.secretKey, [{ aegisId: me.aegisId, publicKeyB64: me.publicKeyB64 }]);
     const payload = JSON.stringify({ type: 'sender_key_dist', text: JSON.stringify({ groupId: 'group-9', ciphertextB64: box!.ciphertextB64, nonceB64: box!.nonceB64, iteration: box!.iteration }) });
     const { envelope } = encryptMessage(payload, peer.aegisId, me.publicKey, peer.secretKey, senderState);
 
@@ -480,7 +471,7 @@ describe('federation F3 — foreign contacts: sealed control plane + group re-ke
     const senderState = establishSyncedSession(me, peer);
 
     const sk = generateSenderKey();
-    const [box] = await sealSenderKeyForRecipients(sk, 'group-9', impostor.aegisId, impostor.secretKeyB64, [{ aegisId: me.aegisId, publicKeyB64: me.publicKeyB64 }]);
+    const [box] = await sealSenderKeyForRecipients(sk, 'group-9', impostor.aegisId, impostor.secretKey, [{ aegisId: me.aegisId, publicKeyB64: me.publicKeyB64 }]);
     const payload = JSON.stringify({ type: 'sender_key_dist', text: JSON.stringify({ groupId: 'group-9', ciphertextB64: box!.ciphertextB64, nonceB64: box!.nonceB64, iteration: 0 }) });
     const { envelope } = encryptMessage(payload, peer.aegisId, me.publicKey, peer.secretKey, senderState);
     await mockFakeSocket.handlers.get('envelope')!({ id: 'env-skd-2', from: peer.aegisId, to: me.aegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 });

@@ -369,6 +369,24 @@ int aegis_vault_derive_ed25519(uint32_t *handle, uint8_t *blob, size_t bloblen, 
   return rc;
 }
 
+int aegis_vault_copy(uint32_t *handle, uint8_t *blob, size_t bloblen, uint32_t src, const uint8_t *slot,
+                     size_t slotlen) {
+  int k, s, rc;
+  if (handle == NULL || !slot_args_ok(slot, slotlen)) return AEGIS_EBADLEN;
+  pthread_mutex_lock(&mu);
+  k = key_index(src);
+  s = find_slot(slot, slotlen);
+  if (k < 0 || s < 0) {
+    rc = AEGIS_ENOKEY;
+  } else {
+    sodium_mprotect_readonly(keys[k].secret);
+    rc = add_key(handle, blob, bloblen, NULL, 0, s, keys[k].type, keys[k].secret);
+    sodium_mprotect_noaccess(keys[k].secret);
+  }
+  pthread_mutex_unlock(&mu);
+  return rc;
+}
+
 int aegis_vault_release(uint32_t handle) {
   int k;
   pthread_mutex_lock(&mu);
@@ -429,6 +447,14 @@ int aegis_vault_mlkem768_dec(uint32_t handle, uint8_t *ss, size_t sslen, const u
   int rc = AEGIS_OK;
   WITH_KEY(handle, AEGIS_KEY_MLKEM768,
            rc = aegis_mlkem768_dec(ss, sslen, ct, ctlen, key, crypto_kem_mlkem768_SECRETKEYBYTES));
+  return rc;
+}
+
+int aegis_vault_export(uint32_t handle, int type, uint8_t *out, size_t outlen) {
+  int rc = AEGIS_OK;
+  size_t len = aegis_vault_key_len(type);
+  if (len == 0 || out == NULL || outlen != len) return AEGIS_EBADLEN;
+  WITH_KEY(handle, type, memcpy(out, key, len));
   return rc;
 }
 

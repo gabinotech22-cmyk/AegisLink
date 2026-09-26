@@ -19,12 +19,13 @@ import { runAnonymousOnboarding } from '../onboarding';
 import { performX3DH } from '../signal/x3dh';
 import { initRatchet } from '../signal/ratchet';
 import { encryptMessageV2, openEnvelopeV2, type FirstContactBlock } from '../messaging';
+import { vk } from './helpers/rawIdentity';
 
 const NOW = 1_750_000_000_000;
 const ONION = 'pg6mmjiyjmcrsslvykfwnntlaru7p5svn6y2ymmju6nubxndf4pscryd.onion';
 
-function signingPub(identity: { signingSecretKey: Uint8Array }): Uint8Array {
-  return identity.signingSecretKey.slice(32, 64);
+function signingPub(identity: { signingPublicKey: Uint8Array }): Uint8Array {
+  return identity.signingPublicKey;
 }
 
 /** Alice performs X3DH against Bob's bundle; her state carries the pending x3dhInit. */
@@ -71,7 +72,7 @@ describe('first-contact sealed v2 (F3b)', () => {
     const { alice, bob, state, fc } = aliceInitState();
     const impostorSigning = nacl.sign.keyPair();
     // The impostor signs as "alice" and embeds ITS key; Bob already pins Alice's real key.
-    const { wire } = encryptMessageV2('hola', alice.identity.aegisId, bob.identity.publicKey, impostorSigning.secretKey, state, NOW,
+    const { wire } = encryptMessageV2('hola', alice.identity.aegisId, bob.identity.publicKey, vk(impostorSigning.secretKey), state, NOW,
       { block: fc, senderSigningPublicKey: impostorSigning.publicKey });
     const pinned = (from: string) => (from === alice.identity.aegisId ? signingPub(alice.identity) : null);
     expect(openEnvelopeV2(wire, bob.identity.secretKey, pinned, NOW, { allowFirstContact: true })).toBeNull();

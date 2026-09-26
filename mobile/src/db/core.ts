@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
 import { ss } from '../utils/secureStore';
 import { nacl } from '../crypto/sodium';
+import { vault } from '../crypto/sodium/vault';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { secretKeySlot, signSecretKeySlot, dbEncKeySlot } from '../crypto/types';
 import { initSchema } from './schema';
@@ -115,6 +116,10 @@ async function deleteSlotProfilePrefs(slot: string): Promise<void> {
 }
 
 export async function deleteIdentitySlot(slot: string): Promise<void> {
+  // 0. Cryptographic erase (F-1b): the profile's KEK leaves the OS keystore and
+  //    its keys the vault, so a surviving copy of any of its blobs is unreadable.
+  await vault.destroyProfile(slot).catch(() => {});
+
   // 1. Delete credentials and E2EE keys
   await SecureStore.deleteItemAsync(getSecretKeySlot(slot)).catch(() => {});
   await SecureStore.deleteItemAsync(getSignSecretKeySlot(slot)).catch(() => {});
@@ -156,9 +161,11 @@ export async function deleteIdentitySlot(slot: string): Promise<void> {
 export interface StoredIdentity {
   aegisId: string;
   publicKeyB64: string;
-  secretKeyB64: string;
+  /** The X25519 identity key as a vault blob ("vault1:…", F-1b); raw base64 if stored before F-1b. */
+  secretKeyStored: string;
   signingPublicKeyB64: string;
-  signingSecretKeyB64: string;
+  /** The Ed25519 identity key, same form. */
+  signingSecretKeyStored: string;
   createdAt: number;
 }
 
@@ -625,8 +632,8 @@ export async function saveIdentity(v: StoredIdentity): Promise<void> {
     keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY,
   };
   const persistKeys = async () => {
-    await SecureStore.setItemAsync(getSecretKeySlot(), v.secretKeyB64, secureOpts);
-    await SecureStore.setItemAsync(getSignSecretKeySlot(), v.signingSecretKeyB64, secureOpts);
+    await SecureStore.setItemAsync(getSecretKeySlot(), v.secretKeyStored, secureOpts);
+    await SecureStore.setItemAsync(getSignSecretKeySlot(), v.signingSecretKeyStored, secureOpts);
   };
   try {
     await persistKeys();
@@ -639,9 +646,9 @@ export async function saveIdentity(v: StoredIdentity): Promise<void> {
 }
 
 export async function loadIdentity(): Promise<StoredIdentity | null> {
-  const secretKeyB64 = await SecureStore.getItemAsync(getSecretKeySlot());
-  const signingSecretKeyB64 = await SecureStore.getItemAsync(getSignSecretKeySlot());
-  if (!secretKeyB64 || !signingSecretKeyB64) return null;
+  const secretKeyStored = await SecureStore.getItemAsync(getSecretKeySlot());
+  const signingSecretKeyStored = await SecureStore.getItemAsync(getSignSecretKeySlot());
+  if (!secretKeyStored || !signingSecretKeyStored) return null;
   return withDb(async (d) => {
     const row = await d.getFirstAsync<{
       aegis_id: string;
@@ -653,15 +660,16 @@ export async function loadIdentity(): Promise<StoredIdentity | null> {
     return {
       aegisId: row.aegis_id,
       publicKeyB64: row.public_key_b64,
-      secretKeyB64: secretKeyB64,
+      secretKeyStored,
       signingPublicKeyB64: row.signing_public_key_b64,
-      signingSecretKeyB64: signingSecretKeyB64,
+      signingSecretKeyStored,
       createdAt: row.created_at,
     };
   });
 }
 
 export async function clearIdentity(): Promise<void> {
+  await vault.destroyProfile(activeSlot).catch(() => {});
   await SecureStore.deleteItemAsync(getSecretKeySlot());
   await SecureStore.deleteItemAsync(getSignSecretKeySlot());
   return withDb(async (d) => {
@@ -960,7 +968,9 @@ export async function wipeDatabase(): Promise<void> {
 
   // ── Phase 3: SecureStore purges — all outside the withDb callback ────────────
 
-  // Identity secret keys (mirrors what clearIdentity does in SecureStore).
+  // Identity secret keys (mirrors what clearIdentity does in SecureStore),
+  // after a cryptographic erase of the profile's vault KEK (F-1b).
+  await vault.destroyProfile(slot).catch(() => {});
   await SecureStore.deleteItemAsync(getSecretKeySlot()).catch(() => {});
   await SecureStore.deleteItemAsync(getSignSecretKeySlot()).catch(() => {});
 

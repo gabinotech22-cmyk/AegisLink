@@ -189,7 +189,15 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
         `safeStorage`, canal `vault:call`). Fachadas `crypto/sodium/vault.ts` en las dos plataformas.
         Pruebas: `differential.mjs` (bóveda C vs TweetNaCl/@noble, aislamiento, manipulación,
         liberación, bloqueo), `vault.test.ts` gemelos, `main/crypto/vault/__tests__/ops.test.ts`.
-      - [ ] 1b — claves de identidad a la bóveda (migración + todos los usos).
+      - [x] **1b — claves de identidad** ✅: `Identity.secretKey`/`signingSecretKey` son handles de
+        la bóveda en las dos plataformas; firmar, cifrar, X3DH, sealed sender, grupos, canales y
+        llamadas van por handle. Migración única al hidratar (clave cruda → blob `vault1:`),
+        borrado criptográfico al borrar perfil y en pánico, exportación solo en backup, vincular y
+        frase (en desktop, tras un diálogo nativo del proceso main). En desktop además gana las
+        comprobaciones de integridad de `identityFromStored` que solo tenía mobile. Pruebas:
+        `identityFromStored.*.test.ts` y `vaultExport.guard.test.ts` (gemelos),
+        `store/__tests__/identity.vaultMigration.test.ts`, `ops.test.ts`, `differential.mjs`
+        (`vault_export`, `vault_copy`).
       - [ ] 2 — prekeys (SPK/OPK/PQSPK) y ML-KEM desktop en main.
       - [ ] 3 — estado del Double Ratchet (C en mobile, main en desktop), sellado.
 - [x] **Argon2id nativo en mobile** ✅ (#549; efectivo desde el primer build nativo que lo incluya):

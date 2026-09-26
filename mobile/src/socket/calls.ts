@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { logger } from '../utils/logger';
 import { nacl } from '../crypto/sodium';
+import type { VaultKey } from '../crypto/sodium/vault';
 import { decodeBase64 } from 'tweetnacl-util';
 ;
 import { getSocket, isConnected } from './client';
@@ -85,11 +86,11 @@ function forgetCallKey(callId: string): void {
   if (k) { k.fill(0); callKeys.delete(callId); } // zeroize (golden rule #9)
 }
 
-/** Our Ed25519 signing secret + box secret + aegisId from the in-memory identity. */
-function ownSealedKeys(): { secretKey: Uint8Array; signingSecretKey: Uint8Array; aegisId: string } | null {
+/** Our identity keys (vault handles) + aegisId from the in-memory identity. */
+function ownSealedKeys(): { secretKey: VaultKey; signingSecretKey: VaultKey; aegisId: string } | null {
   try {
     const { useIdentity } = require('../store/identity') as {
-      useIdentity: { getState: () => { identity: { secretKey: Uint8Array; signingSecretKey: Uint8Array; aegisId: string } | null } };
+      useIdentity: { getState: () => { identity: { secretKey: VaultKey; signingSecretKey: VaultKey; aegisId: string } | null } };
     };
     const id = useIdentity.getState().identity;
     if (!id?.signingSecretKey) return null;

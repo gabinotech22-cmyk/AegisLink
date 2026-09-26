@@ -41,7 +41,7 @@ jest.mock('../../utils/secureStore', () => ({
 }));
 
 // A genuinely CONSISTENT keypair — identityFromStored now verifies that
-// secretKeyB64 actually derives publicKeyB64 (and signingSecretKeyB64
+// secretKeyStored actually derives publicKeyB64 (and signingSecretKeyStored
 // derives signingPublicKeyB64) and throws otherwise (see
 // crypto/__tests__/identityFromStored.corruption.test.ts), so arbitrary
 // mismatched dummy bytes are no longer valid fixtures here. The jest.mock
@@ -63,9 +63,9 @@ jest.mock('../../db/local', () => {
     loadIdentity: jest.fn().mockResolvedValue({
       aegisId: 'REAL-AAAA-BBBB',
       publicKeyB64: encodeBase64(box.publicKey),
-      secretKeyB64: encodeBase64(seed),
+      secretKeyStored: encodeBase64(seed),
       signingPublicKeyB64: encodeBase64(sign.publicKey),
-      signingSecretKeyB64: encodeBase64(sign.secretKey),
+      signingSecretKeyStored: encodeBase64(sign.secretKey),
       createdAt: 1000,
     }),
     saveIdentity: jest.fn().mockResolvedValue(undefined),
@@ -93,9 +93,9 @@ const _sign = nacl.sign.keyPair.fromSeed(FIXED_SEED);
 const mockStoredIdentity = {
   aegisId: 'REAL-AAAA-BBBB',
   publicKeyB64: encodeBase64(_box.publicKey),
-  secretKeyB64: encodeBase64(FIXED_SEED),
+  secretKeyStored: encodeBase64(FIXED_SEED),
   signingPublicKeyB64: encodeBase64(_sign.publicKey),
-  signingSecretKeyB64: encodeBase64(_sign.secretKey),
+  signingSecretKeyStored: encodeBase64(_sign.secretKey),
   createdAt: 1000,
 };
 
@@ -134,9 +134,9 @@ describe('identity store — registration retry-storm cooldown', () => {
       identity: {
         aegisId: mockStoredIdentity.aegisId,
         publicKeyB64: mockStoredIdentity.publicKeyB64,
-        secretKeyB64: mockStoredIdentity.secretKeyB64,
+        secretKeyStored: mockStoredIdentity.secretKeyStored,
         signingPublicKeyB64: mockStoredIdentity.signingPublicKeyB64,
-        signingSecretKeyB64: mockStoredIdentity.signingSecretKeyB64,
+        signingSecretKeyStored: mockStoredIdentity.signingSecretKeyStored,
         createdAt: mockStoredIdentity.createdAt,
       } as never,
       publishStatus: 'failed',

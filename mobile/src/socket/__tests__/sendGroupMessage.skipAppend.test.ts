@@ -162,17 +162,15 @@ jest.mock('tweetnacl-util', () => ({
 
 import { sendGroupMessage } from '../client';
 import type { Identity } from '../../crypto/identity';
+import { stubKeys } from '../../crypto/__tests__/helpers/rawIdentity';
 
 const mockIdentity: Identity = {
   aegisId: 'self-id',
   publicKey: new Uint8Array(32),
-  secretKey: new Uint8Array(32),
+  ...stubKeys(),
   publicKeyB64: 'cHVia2V5',
-  secretKeyB64: 'c2VjcmV0',
   signingPublicKey: new Uint8Array(32),
-  signingSecretKey: new Uint8Array(64),
   signingPublicKeyB64: 'c2lnbmluZw==',
-  signingSecretKeyB64: 'c2lnU2VjcmV0',
   createdAt: 0,
 };
 

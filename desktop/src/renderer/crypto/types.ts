@@ -21,18 +21,12 @@ export interface KeyPair {
   secretKey: Uint8Array;
 }
 
-export interface Identity {
-  aegisId: string;
-  publicKey: Uint8Array;
-  secretKey: Uint8Array;
-  publicKeyB64: string;
-  secretKeyB64: string;
-  signingPublicKey: Uint8Array;
-  signingSecretKey: Uint8Array;
-  signingPublicKeyB64: string;
-  signingSecretKeyB64: string;
-  createdAt: number;
-}
+/**
+ * The user's long-term identity. Its private keys are key-vault handles (F-1b,
+ * docs/F1B-KEY-VAULT-DESIGN.md): the secrets never exist in the renderer.
+ * Defined in ./identity.
+ */
+export type { Identity } from './identity';
 
 export interface PublicIdentity {
   aegisId: string;

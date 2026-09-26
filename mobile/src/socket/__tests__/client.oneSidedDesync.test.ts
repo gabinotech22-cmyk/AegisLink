@@ -167,22 +167,13 @@ jest.mock('socket.io-client', () => ({
 
 import type { Identity } from '../../crypto/identity';
 import { deriveAegisId } from '../../crypto/identity';
+import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
+import { vault } from '../../crypto/sodium/vault';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return {
-    aegisId: deriveAegisId(box.publicKey),
-    publicKey: box.publicKey,
-    secretKey: box.secretKey,
-    publicKeyB64: encodeBase64(box.publicKey),
-    secretKeyB64: encodeBase64(box.secretKey),
-    signingPublicKey: sign.publicKey,
-    signingSecretKey: sign.secretKey,
-    signingPublicKeyB64: encodeBase64(sign.publicKey),
-    signingSecretKeyB64: encodeBase64(sign.secretKey),
-    createdAt: Date.now(),
-  };
+  return identityFromRaw(box, sign);
 }
 
 /**
@@ -194,7 +185,7 @@ function buildIdentity(): Identity {
  */
 function buildResetNudge(me: Identity, peer: Identity) {
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, me.signingSecretKey);
+  const sig = vault.sign(me.signingSecretKey, spk.publicKey);
   mockSecure.set('aegis.spkSecret.b64', encodeBase64(spk.secretKey));
   const bundle = {
     identityKeyB64: me.publicKeyB64,
@@ -248,7 +239,7 @@ function bringOnline() {
 
 function setBundle(peer: Identity) {
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, peer.signingSecretKey);
+  const sig = vault.sign(peer.signingSecretKey, spk.publicKey);
   mockFakeSocket.nextBundle = {
     identityKeyB64: peer.publicKeyB64,
     signingPublicKeyB64: peer.signingPublicKeyB64,

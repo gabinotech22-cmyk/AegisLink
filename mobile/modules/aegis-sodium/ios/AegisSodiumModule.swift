@@ -116,6 +116,10 @@ public class AegisSodiumModule: Module {
       guard let x = hIn(xhandle) else { return -1 }
       return Int(aegis_vault_derive_ed25519(h(handle), mp(blob), n(blob), mp(pub), n(pub), x))
     }
+    Function("vaultCopy") { (handle: Uint8Array, blob: Uint8Array, src: Uint8Array, slot: Uint8Array) -> Int in
+      guard let sh = hIn(src) else { return -1 }
+      return Int(aegis_vault_copy(h(handle), mp(blob), n(blob), sh, p(slot), n(slot)))
+    }
     Function("vaultRelease") { (handle: Uint8Array) -> Int in
       guard let k = hIn(handle) else { return -1 }
       return Int(aegis_vault_release(k))
@@ -139,6 +143,10 @@ public class AegisSodiumModule: Module {
     Function("vaultMlkem768Dec") { (handle: Uint8Array, ss: Uint8Array, ct: Uint8Array) -> Int in
       guard let k = hIn(handle) else { return -1 }
       return Int(aegis_vault_mlkem768_dec(k, mp(ss), n(ss), p(ct), n(ct)))
+    }
+    Function("vaultExport") { (handle: Uint8Array, type: Int, out: Uint8Array) -> Int in
+      guard let k = hIn(handle) else { return -1 }
+      return Int(aegis_vault_export(k, Int32(type), mp(out), n(out)))
     }
     Function("vaultLiveKeys") { () -> Int in Int(aegis_vault_live_keys()) }
     // Hundreds of milliseconds of work: async (off the JS thread), so it cannot

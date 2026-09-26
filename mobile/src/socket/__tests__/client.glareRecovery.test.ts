@@ -25,6 +25,7 @@ import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-ut
 import { performX3DH, performX3DHReceiver } from '../../crypto/signal/x3dh';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, type RatchetState } from '../../crypto/signal/ratchet';
 import { deriveAegisId } from '../../crypto/identity';
+import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
 
 interface Peer {
   aegisId: string;
@@ -60,18 +61,7 @@ const amInitiatorFor = (mine: string, peer: string) => mine > peer;
  */
 function aliceInit(alice: Peer, bob: Peer) {
   const x3dh = performX3DH(
-    {
-      aegisId: alice.aegisId,
-      publicKey: alice.box.publicKey,
-      secretKey: alice.box.secretKey,
-      publicKeyB64: encodeBase64(alice.box.publicKey),
-      secretKeyB64: encodeBase64(alice.box.secretKey),
-      signingPublicKey: alice.sign.publicKey,
-      signingSecretKey: alice.sign.secretKey,
-      signingPublicKeyB64: encodeBase64(alice.sign.publicKey),
-      signingSecretKeyB64: encodeBase64(alice.sign.secretKey),
-      createdAt: 0,
-    } as any,
+    identityFromRaw(alice.box, alice.sign, alice.aegisId),
     bundleFor(bob),
   );
   const senderState = initRatchet(x3dh.rootKey, bob.spk.publicKey, true);
@@ -89,18 +79,7 @@ function aliceInit(alice: Peer, bob: Peer) {
 /** Bob adopts alice's init, deriving the same root key (decryptAndAppend x3dh branch). */
 function bobAdopt(bob: Peer, alice: Peer, init: ReturnType<typeof aliceInit>): { rootKey: Uint8Array; state: RatchetState } {
   const rootKey = performX3DHReceiver(
-    {
-      aegisId: bob.aegisId,
-      publicKey: bob.box.publicKey,
-      secretKey: bob.box.secretKey,
-      publicKeyB64: encodeBase64(bob.box.publicKey),
-      secretKeyB64: encodeBase64(bob.box.secretKey),
-      signingPublicKey: bob.sign.publicKey,
-      signingSecretKey: bob.sign.secretKey,
-      signingPublicKeyB64: encodeBase64(bob.sign.publicKey),
-      signingSecretKeyB64: encodeBase64(bob.sign.secretKey),
-      createdAt: 0,
-    } as any,
+    identityFromRaw(bob.box, bob.sign, bob.aegisId),
     bob.spk.secretKey,
     null,
     alice.box.publicKey,

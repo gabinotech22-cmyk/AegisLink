@@ -47,12 +47,14 @@ internal object AegisSodiumNative {
   @JvmStatic external fun vaultImport(handle: ByteBuffer?, blob: ByteBuffer?, pub: ByteBuffer?, slot: ByteBuffer?, type: Int, raw: ByteBuffer?): Int
   @JvmStatic external fun vaultLoad(handle: ByteBuffer?, type: ByteBuffer?, pub: ByteBuffer?, slot: ByteBuffer?, blob: ByteBuffer?): Int
   @JvmStatic external fun vaultDeriveEd25519(handle: ByteBuffer?, blob: ByteBuffer?, pub: ByteBuffer?, xhandle: ByteBuffer?): Int
+  @JvmStatic external fun vaultCopy(handle: ByteBuffer?, blob: ByteBuffer?, src: ByteBuffer?, slot: ByteBuffer?): Int
   @JvmStatic external fun vaultRelease(handle: ByteBuffer?): Int
   @JvmStatic external fun vaultSign(handle: ByteBuffer?, sig: ByteBuffer?, m: ByteBuffer?): Int
   @JvmStatic external fun vaultScalarmult(handle: ByteBuffer?, q: ByteBuffer?, p: ByteBuffer?): Int
   @JvmStatic external fun vaultBox(handle: ByteBuffer?, c: ByteBuffer?, m: ByteBuffer?, n: ByteBuffer?, pk: ByteBuffer?): Int
   @JvmStatic external fun vaultBoxOpen(handle: ByteBuffer?, m: ByteBuffer?, c: ByteBuffer?, n: ByteBuffer?, pk: ByteBuffer?): Int
   @JvmStatic external fun vaultMlkem768Dec(handle: ByteBuffer?, ss: ByteBuffer?, ct: ByteBuffer?): Int
+  @JvmStatic external fun vaultExport(handle: ByteBuffer?, type: Int, out: ByteBuffer?): Int
   @JvmStatic external fun vaultLiveKeys(): Int
   @JvmStatic external fun mlkem768Keypair(pk: ByteBuffer?, sk: ByteBuffer?): Int
   @JvmStatic external fun mlkem768SeedKeypair(pk: ByteBuffer?, sk: ByteBuffer?, seed: ByteBuffer?): Int
@@ -234,6 +236,9 @@ class AegisSodiumModule : Module() {
     Function("vaultDeriveEd25519") { handle: Uint8Array, blob: Uint8Array, pub: Uint8Array, xhandle: Uint8Array ->
       AegisSodiumNative.vaultDeriveEd25519(b(handle), b(blob), b(pub), b(xhandle))
     }
+    Function("vaultCopy") { handle: Uint8Array, blob: Uint8Array, src: Uint8Array, slot: Uint8Array ->
+      AegisSodiumNative.vaultCopy(b(handle), b(blob), b(src), b(slot))
+    }
     Function("vaultRelease") { handle: Uint8Array -> AegisSodiumNative.vaultRelease(b(handle)) }
     Function("vaultSign") { handle: Uint8Array, sig: Uint8Array, m: Uint8Array ->
       AegisSodiumNative.vaultSign(b(handle), b(sig), b(m))
@@ -249,6 +254,9 @@ class AegisSodiumModule : Module() {
     }
     Function("vaultMlkem768Dec") { handle: Uint8Array, ss: Uint8Array, ct: Uint8Array ->
       AegisSodiumNative.vaultMlkem768Dec(b(handle), b(ss), b(ct))
+    }
+    Function("vaultExport") { handle: Uint8Array, type: Int, out: Uint8Array ->
+      AegisSodiumNative.vaultExport(b(handle), type, b(out))
     }
     Function("vaultLiveKeys") { AegisSodiumNative.vaultLiveKeys() }
     AsyncFunction("pbkdf2Sha256") { pwd: ByteArray, salt: ByteArray, iterations: Int, outLen: Int ->

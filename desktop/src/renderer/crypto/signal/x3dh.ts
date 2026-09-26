@@ -1,4 +1,5 @@
 import { nacl } from '../sodium';
+import { vault } from '../sodium/vault';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { hkdfSHA256 } from './kdf';
@@ -162,7 +163,7 @@ export function performX3DH(
   let sharedSecret: Uint8Array | undefined;
 
   try {
-    dh1 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, bobSPK), 'DH1');
+    dh1 = assertNonZeroDH(vault.scalarMult(myIdentity.secretKey, bobSPK), 'DH1');
     dh2 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobIK), 'DH2');
     dh3 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobSPK), 'DH3');
 
@@ -293,7 +294,7 @@ export function performX3DHReceiver(
 
   try {
     dh1 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceIK), 'DH1');
-    dh2 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, aliceEK), 'DH2');
+    dh2 = assertNonZeroDH(vault.scalarMult(myIdentity.secretKey, aliceEK), 'DH2');
     dh3 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceEK), 'DH3');
 
     const F = new Uint8Array(32).fill(0xFF);
@@ -401,11 +402,11 @@ export function generatePreKeys(
   pqSpkKeyId = 1,
 ): DevicePreKeySet {
   const spk = nacl.box.keyPair();
-  const signature = nacl.sign.detached(spk.publicKey, identity.signingSecretKey);
+  const signature = vault.sign(identity.signingSecretKey, spk.publicKey);
 
   // Signed PQ PreKey (ML-KEM-768), signed with the SAME Ed25519 identity key.
   const pq = ml_kem768.keygen();
-  const pqSignature = nacl.sign.detached(pq.publicKey, identity.signingSecretKey);
+  const pqSignature = vault.sign(identity.signingSecretKey, pq.publicKey);
 
   const oneTimePreKeys: { keyId: number; publicKeyB64: string }[] = [];
   const opkSecrets = new Map<number, Uint8Array>();

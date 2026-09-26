@@ -224,28 +224,19 @@ jest.mock('socket.io-client', () => ({
 }));
 
 import type { Identity } from '../../crypto/identity';
+import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
+import { vault } from '../../crypto/sodium/vault';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return {
-    aegisId: deriveAegisId(box.publicKey),
-    publicKey: box.publicKey,
-    secretKey: box.secretKey,
-    publicKeyB64: encodeBase64(box.publicKey),
-    secretKeyB64: encodeBase64(box.secretKey),
-    signingPublicKey: sign.publicKey,
-    signingSecretKey: sign.secretKey,
-    signingPublicKeyB64: encodeBase64(sign.publicKey),
-    signingSecretKeyB64: encodeBase64(sign.secretKey),
-    createdAt: Date.now(),
-  } as Identity;
+  return identityFromRaw(box, sign);
 }
 
 /** Serve `peer`'s prekey bundle from THEIR relay (foreignRelayHttp seam). Returns the SPK pair. */
 function foreignPeerBundleVia(peer: Identity) {
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, peer.signingSecretKey);
+  const sig = vault.sign(peer.signingSecretKey, spk.publicKey);
   const bundle = {
     identityKeyB64: peer.publicKeyB64,
     signingPublicKeyB64: peer.signingPublicKeyB64,
@@ -279,7 +270,7 @@ function strangerBootstrapWire(alice: Identity, me: Identity, text: string) {
   const bundle = {
     identityKeyB64: me.publicKeyB64,
     signingPublicKeyB64: me.signingPublicKeyB64,
-    signedPreKey: { keyId: 1, publicKeyB64: encodeBase64(spk.publicKey), signatureB64: encodeBase64(nacl.sign.detached(spk.publicKey, me.signingSecretKey)) },
+    signedPreKey: { keyId: 1, publicKeyB64: encodeBase64(spk.publicKey), signatureB64: encodeBase64(vault.sign(me.signingSecretKey, spk.publicKey)) },
     oneTimePreKey: null,
   };
   const x = performX3DH(alice, bundle);

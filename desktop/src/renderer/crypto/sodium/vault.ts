@@ -35,6 +35,17 @@ export class VaultKeyUnavailableError extends Error {
   }
 }
 
+/** The user declined, in the main process's native dialog, to let a raw key out. */
+export class VaultExportDeniedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'VaultExportDeniedError';
+  }
+}
+
+/** Why a raw key may leave the vault (design doc §5): the user is asked first. */
+export type VaultExportPurpose = 'backup' | 'recoveryPhrase';
+
 /** A blob that is not this profile's, or was altered. */
 export class VaultBlobRejectedError extends Error {
   constructor(message: string) {
@@ -49,6 +60,7 @@ function call<T>(op: string, ...args: unknown[]): T {
   if (r.ok) return r.value as T;
   if (r.code === 'NOKEY') throw new VaultKeyUnavailableError(r.message);
   if (r.code === 'REJECTED') throw new VaultBlobRejectedError(r.message);
+  if (r.code === 'DENIED') throw new VaultExportDeniedError(r.message);
   throw new Error(r.message);
 }
 
@@ -99,6 +111,23 @@ export const vault = {
   deriveEd25519(x: VaultKey): VaultKeyWithBlob {
     need(x, 'x25519', 'deriveEd25519');
     return withBlob(x.slot, call<Info>('deriveEd25519', x.handle));
+  },
+  /**
+   * The same key as a key of another (unlocked) profile: a new profile's
+   * identity is minted in the active profile (its slot is its own AegisID, not
+   * known before) and copied over; the caller releases the original.
+   */
+  copy(key: VaultKey, slot: string): VaultKeyWithBlob {
+    const info = call<Info>('copy', key.handle, slot);
+    return { key: { handle: info.handle, slot, type: key.type, publicKey: key.publicKey }, blob: info.blob as Uint8Array };
+  },
+  /**
+   * The raw secret of `key`, for the explicit exports ONLY (design doc §5).
+   * The main process first asks the user in a native dialog the renderer
+   * cannot click; declined → VaultExportDeniedError. The caller zeroes the copy.
+   */
+  exportSecret(key: VaultKey, purpose: VaultExportPurpose): Uint8Array {
+    return call<Uint8Array>('exportSecret', key.handle, key.type, purpose);
   },
   release(key: VaultKey): void {
     try {

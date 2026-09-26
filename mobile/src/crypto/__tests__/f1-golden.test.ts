@@ -27,6 +27,7 @@ import { initRatchet, ratchetEncrypt, ratchetDecrypt, type RatchetState } from '
 import { serializeRatchetState, reviveRatchetState } from '../../socket/ratchetSerde';
 import { sealEnvelope, openEnvelope, type SealedWire } from '../sealedSender';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
+import { vk } from './helpers/rawIdentity';
 
 const FIXTURE = path.join(__dirname, 'fixtures', 'f1-golden.json');
 const b64 = encodeBase64;
@@ -126,7 +127,7 @@ function generate(): Golden {
       senderId: 'golden-sender',
       nowMs,
       payload,
-      wire: sealEnvelope(recipient.publicKey, 'golden-sender', sender.secretKey, payload, nowMs),
+      wire: sealEnvelope(recipient.publicKey, 'golden-sender', vk(sender.secretKey), payload, nowMs),
     },
     ratchet: { classic: generateTranscript(false), hybrid: generateTranscript(true) },
   };
@@ -178,7 +179,7 @@ describe('F-1 golden fixtures (pre-libsodium output must stay valid)', () => {
     const s = golden.sealed;
     const recipient = nacl.box.keyPair.fromSecretKey(unb64(s.recipientSeed));
     const sender = nacl.sign.keyPair.fromSeed(unb64(s.senderSeed));
-    const opened = openEnvelope(s.wire, recipient.secretKey, (from) => (from === s.senderId ? sender.publicKey : null), s.nowMs);
+    const opened = openEnvelope(s.wire, vk(recipient.secretKey), (from) => (from === s.senderId ? sender.publicKey : null), s.nowMs);
     expect(opened).not.toBeNull();
     expect(opened!.from).toBe(s.senderId);
     expect(opened!.payload).toBe(s.payload);

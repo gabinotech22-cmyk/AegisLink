@@ -21,6 +21,7 @@
 import * as Crypto from 'expo-crypto';
 import { logger } from '../utils/logger';
 import { nacl } from '../crypto/sodium';
+import { vault, type VaultKey } from '../crypto/sodium/vault';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import type { MediaStream } from 'react-native-webrtc';
 import { getSocket, isConnected } from './client';
@@ -99,11 +100,11 @@ function peerPublicKey(aegisId: string): Uint8Array | null {
   }
 }
 
-function ownKeys(): { secretKey: Uint8Array; aegisId: string } | null {
+function ownKeys(): { secretKey: VaultKey; aegisId: string } | null {
   try {
     const { useIdentity } = require('../store/identity') as {
       useIdentity: {
-        getState: () => { identity: { secretKey: Uint8Array; aegisId: string } | null };
+        getState: () => { identity: { secretKey: VaultKey; aegisId: string } | null };
       };
     };
     const id = useIdentity.getState().identity;
@@ -122,7 +123,7 @@ function sealSignal(recipientAegisId: string, payload: string): SealedSignalWire
   const inner: SignalInner = { v: SIGNAL_VERSION, from: me.aegisId, payload };
   const innerBytes = new TextEncoder().encode(JSON.stringify(inner));
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  const ciphertext = nacl.box(innerBytes, nonce, recipientPub, me.secretKey);
+  const ciphertext = vault.box(me.secretKey, innerBytes, nonce, recipientPub);
   return { ciphertext: encodeBase64(ciphertext), nonce: encodeBase64(nonce) };
 }
 
@@ -144,7 +145,7 @@ function openSignalFrom(senderAegisId: string, wire: SealedSignalWire): string |
   // The static box is authenticated: a successful open against `senderPub`
   // proves the body was sealed by the holder of that peer's X25519 secret. The
   // inner `from` is then bound to that key — a contact cannot claim another's id.
-  const opened = nacl.box.open(ciphertext, nonce, senderPub, me.secretKey);
+  const opened = vault.boxOpen(me.secretKey, ciphertext, nonce, senderPub);
   if (!opened) return null;
 
   let inner: SignalInner;

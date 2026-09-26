@@ -63,7 +63,10 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
     const timer = setTimeout(() => {
       // Import lazily to avoid circular deps
       const { createIdentity } = require('../crypto/identity') as typeof import('../crypto/identity');
-      const id = createIdentity();
+      const { useIdentity } = require('../store/identity') as typeof import('../store/identity');
+      // Minted in the active profile's vault (unlocked); createProfile copies
+      // it into the new profile once its slot (this AegisID) exists.
+      const id = createIdentity(useIdentity.getState().activeSlotId ?? 'self');
       newIdentityRef.current = id;
       setNewAegisId(id.aegisId);
       setNewPublicKeyB64(id.publicKeyB64);

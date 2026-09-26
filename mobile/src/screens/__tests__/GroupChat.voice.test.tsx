@@ -257,7 +257,7 @@ jest.mock('../../socket/client', () => ({
 const mockIdentity = {
   aegisId: 'self-aegis-id',
   publicKeyB64: 'pubkey',
-  secretKey: new Uint8Array(32),
+  secretKey: require('../../crypto/__tests__/helpers/rawIdentity').testBoxKey(),
 };
 
 jest.mock('../../store/identity', () => ({
