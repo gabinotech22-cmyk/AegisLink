@@ -164,6 +164,35 @@ export const nacl: NaclPrimitives = {
   sign,
 };
 
+export interface MlKemKeyPair {
+  publicKey: Uint8Array;
+  secretKey: Uint8Array;
+}
+
+const MLKEM_PK = 1184;
+const MLKEM_SK = 2400;
+/** Offset of ek inside a FIPS 203 dk: dk_PKE (384 * k bytes, k = 3) || ek || H(ek) || z. */
+const MLKEM_EK_OFFSET = 1152;
+
+/**
+ * ML-KEM-768 (FIPS 203) with the @noble/post-quantum API, computed in the main
+ * process (F-1b phase 2; `main/crypto/sodium/mlkem.ts`) — same bytes as before.
+ * Mirrors mobile's `ml_kem768` facade (native libsodium there).
+ */
+export const ml_kem768 = {
+  keygen: (seed?: Uint8Array): MlKemKeyPair => call('mlkemKeygen', seed),
+  encapsulate: (publicKey: Uint8Array): { cipherText: Uint8Array; sharedSecret: Uint8Array } =>
+    call('mlkemEncapsulate', publicKey),
+  decapsulate: (cipherText: Uint8Array, secretKey: Uint8Array): Uint8Array =>
+    call('mlkemDecapsulate', cipherText, secretKey),
+  /** The public key embedded in a secret key (a copy). */
+  getPublicKey(secretKey: Uint8Array): Uint8Array {
+    if (!(secretKey instanceof Uint8Array)) throw new TypeError('unexpected type, use Uint8Array');
+    if (secretKey.length !== MLKEM_SK) throw new Error('ml_kem768.getPublicKey: bad secret key size');
+    return secretKey.slice(MLKEM_EK_OFFSET, MLKEM_EK_OFFSET + MLKEM_PK);
+  },
+};
+
 /** `nacl.secretbox` for whole attachments: runs off the renderer's synchronous path. */
 export function secretboxAsync(msg: Uint8Array, nonce: Uint8Array, key: Uint8Array): Promise<Uint8Array> {
   return callAsync('secretbox', msg, nonce, key);

@@ -90,11 +90,14 @@ export interface PreKeyBundle {
   pqSignedPreKey?: PqSignedPreKeyPublic | null;
 }
 
-/** Local secret material backing a PreKeyBundle. Stays on device. */
+/**
+ * Local secret material backing a PreKeyBundle. Stays on device, and only in
+ * its persisted form: key-vault blobs of the identity's profile (F-1b phase 2).
+ */
 export interface PreKeySecrets {
-  signedPreKey: { keyId: number; secretKey: Uint8Array };
-  /** keyId -> secretKey. Deleted after one use. */
-  opkSecrets: Map<number, Uint8Array>;
+  signedPreKey: { keyId: number; secretStored: string };
+  /** keyId -> persisted OPK secret (vault blob). Deleted after one use. */
+  opkSecrets: Map<number, string>;
 }
 
 export interface X3DHInitParams {

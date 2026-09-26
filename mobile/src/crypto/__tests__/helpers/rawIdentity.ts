@@ -93,3 +93,13 @@ export function testBoxKey(): VaultKey {
 export function testSignKey(): VaultKey {
   return (memoSign ??= vault.generate('self', 'ed25519').key);
 }
+
+/** A persisted prekey secret (vault blob) as a handle, as the receiver opens it. */
+export function pk(stored: string, type: 'x25519prekey' | 'mlkem768' = 'x25519prekey', slot = 'self'): VaultKey {
+  return vault.openStored(slot, type, stored).key;
+}
+
+/** Same, for an optional one (a missing OPK). */
+export function pkOrNull(stored: string | null | undefined): VaultKey | null {
+  return stored ? pk(stored) : null;
+}

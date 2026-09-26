@@ -8,10 +8,12 @@
  * Same API as mobile's `mobile/src/crypto/sodium/vault.ts` (golden rule #5);
  * handles are numbers here and 4-byte arrays there, both opaque.
  */
+import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { vaultBridge } from './vaultIpcBridge';
 import type { VaultResult } from '../ipc-types';
 
-export type VaultKeyType = 'x25519' | 'ed25519' | 'mlkem768' | 'secret32';
+/** 'x25519prekey' (SPK / OPK): every X25519 operation; exportable for linked devices without the consent dialog. */
+export type VaultKeyType = 'x25519' | 'ed25519' | 'mlkem768' | 'secret32' | 'x25519prekey';
 
 export interface VaultKey {
   /** Opaque handle; meaningless outside this app session. */
@@ -44,7 +46,7 @@ export class VaultExportDeniedError extends Error {
 }
 
 /** Why a raw key may leave the vault (design doc §5): the user is asked first. */
-export type VaultExportPurpose = 'backup' | 'recoveryPhrase';
+export type VaultExportPurpose = 'backup' | 'recoveryPhrase' | 'deviceSync';
 
 /** A blob that is not this profile's, or was altered. */
 export class VaultBlobRejectedError extends Error {
@@ -77,20 +79,41 @@ const withBlob = (slot: string, info: Info): VaultKeyWithBlob => ({
 });
 
 function need(key: VaultKey, type: VaultKeyType, what: string): void {
-  if (key.type !== type) throw new Error(`vault: ${what} needs a ${type} key, got ${key.type}`);
+  // An X25519 prekey does every X25519 operation.
+  if (!(key.type === type || (type === 'x25519' && key.type === 'x25519prekey'))) throw new Error(`vault: ${what} needs a ${type} key, got ${key.type}`);
 }
 
+/**
+ * Persisted form of a vault key: "vault1:" + base64(blob). A string without
+ * the prefix is a raw key stored before F-1b (base64), migrated on load.
+ */
+const STORED_PREFIX = 'vault1:';
+
+export const isVaultStored = (stored: string): boolean => stored.startsWith(STORED_PREFIX);
+export const toStored = (blob: Uint8Array): string => STORED_PREFIX + encodeBase64(blob);
+
+/** Bumped whenever keys are destroyed in bulk (lock, lockAll, destroyProfile): cached handles are stale. */
+let lockEpoch = 0;
+
 export const vault = {
+  /** Handles cached before a different epoch are dead (see `lockEpoch`). */
+  epoch(): number {
+    return lockEpoch;
+  },
+
   unlock(slot: string): Promise<void> {
     return Promise.resolve().then(() => call<void>('unlock', slot));
   },
   destroyProfile(slot: string): Promise<void> {
+    lockEpoch++;
     return Promise.resolve().then(() => call<void>('destroyProfile', slot));
   },
   lock(slot: string): void {
+    lockEpoch++;
     call('lock', slot);
   },
   lockAll(): void {
+    lockEpoch++;
     call('lockAll');
   },
   generate(slot: string, type: VaultKeyType): VaultKeyWithBlob {
@@ -109,7 +132,8 @@ export const vault = {
     return { handle: info.handle, slot, type: info.type, publicKey: info.publicKey };
   },
   deriveEd25519(x: VaultKey): VaultKeyWithBlob {
-    need(x, 'x25519', 'deriveEd25519');
+    // The identity derivation takes the identity key only (exact type, no prekey).
+    if (x.type !== 'x25519') throw new Error(`vault: deriveEd25519 needs a x25519 key, got ${x.type}`);
     return withBlob(x.slot, call<Info>('deriveEd25519', x.handle));
   },
   /**
@@ -123,8 +147,9 @@ export const vault = {
   },
   /**
    * The raw secret of `key`, for the explicit exports ONLY (design doc §5).
-   * The main process first asks the user in a native dialog the renderer
-   * cannot click; declined → VaultExportDeniedError. The caller zeroes the copy.
+   * For 'backup' / 'recoveryPhrase' the main process first asks the user in a
+   * native dialog the renderer cannot click (declined → VaultExportDeniedError);
+   * 'deviceSync' exports prekeys only, without asking. The caller zeroes the copy.
    */
   exportSecret(key: VaultKey, purpose: VaultExportPurpose): Uint8Array {
     return call<Uint8Array>('exportSecret', key.handle, key.type, purpose);
@@ -155,6 +180,23 @@ export const vault = {
   mlkemDecapsulate(key: VaultKey, cipherText: Uint8Array): Uint8Array {
     need(key, 'mlkem768', 'mlkemDecapsulate');
     return call<Uint8Array>('mlkemDecapsulate', key.handle, cipherText);
+  },
+  /**
+   * A persisted key (see `toStored`) into a handle of `slot`: a vault blob
+   * loads; a raw pre-F-1b key is imported (the caller re-persists `stored`
+   * when it differs from what it loaded — that is the one-time migration).
+   */
+  openStored(slot: string, type: VaultKeyType, stored: string): { key: VaultKey; stored: string } {
+    if (isVaultStored(stored)) {
+      return { key: vault.load(slot, decodeBase64(stored.slice(STORED_PREFIX.length))), stored };
+    }
+    const { key, blob } = vault.import(slot, type, decodeBase64(stored));
+    return { key, stored: toStored(blob) };
+  },
+  /** A fresh key of `type` in `slot`, with its persisted form. */
+  generateStored(slot: string, type: VaultKeyType): { key: VaultKey; stored: string } {
+    const { key, blob } = vault.generate(slot, type);
+    return { key, stored: toStored(blob) };
   },
   liveKeys(): number {
     return call<number>('liveKeys');

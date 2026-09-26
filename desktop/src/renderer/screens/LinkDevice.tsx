@@ -187,7 +187,10 @@ export function LinkDeviceScreen({ onBack, onLinked }: Props) {
           await useIdentity.getState().linkDevice(newIdentity);
 
           if (json.spkId != null && json.spkSecretB64) {
-            await saveSpkSecret(json.spkId, json.spkSecretB64);
+            // The mobile's SPK goes straight into our vault, persisted as a blob (F-1b phase 2).
+            const spk = vault.openStored(slot, 'x25519prekey', json.spkSecretB64);
+            vault.release(spk.key);
+            await saveSpkSecret(json.spkId, spk.stored);
           }
 
           await useIdentity.getState().hydrate();

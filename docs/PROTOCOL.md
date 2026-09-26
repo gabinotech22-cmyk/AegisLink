@@ -218,10 +218,13 @@ follow-up **F-1b**. F-1b phase 1b (done) moved the **identity keys** (X25519 +
 Ed25519) into the key vault: JavaScript holds handles and wrapped blobs, and the
 raw keys leave only for the explicit exports (backup, device link, recovery
 phrase — on desktop after a native confirmation dialog;
-[`F1B-KEY-VAULT-DESIGN.md`](F1B-KEY-VAULT-DESIGN.md) §5). Prekeys and ratchet
-state are still in JavaScript until phases 2 and 3. Status: [`docs/ROADMAP.md`](ROADMAP.md) Hito 3.
+[`F1B-KEY-VAULT-DESIGN.md`](F1B-KEY-VAULT-DESIGN.md) §5). Phase 2 (done) did the
+same for the prekeys (SPK, OPKs, PQSPK): generated, stored and used by handle,
+including the receiver's first ratchet step. The per-turn ratchet keys are still
+in JavaScript until phase 3. Status: [`docs/ROADMAP.md`](ROADMAP.md) Hito 3.
 ML-KEM-768 runs only on the clients: native libsodium on mobile, and
-`@noble/post-quantum` 0.7.1 on desktop (see above); the relay never encapsulates
+`@noble/post-quantum` 0.7.1 in the desktop's main process (F-1b phase 2; never
+in the renderer); the relay never encapsulates
 or decapsulates — it only checks the PQSPK signature — so its production image
 carries no PQ code. On mobile `@noble/post-quantum` is now a `devDependency`, the
 oracle of the differential test (`modules/aegis-sodium/test/differential.mjs`,
@@ -888,10 +891,11 @@ on desktop, `lock/__tests__/coldLock.test.ts` on both).
 - **Runtime-level timing side-channels in the remaining JS crypto.** The NaCl,
   HMAC and HKDF primitives run on native libsodium on every platform (§2.1,
   F-1), and so do ML-KEM-768, Argon2id and legacy PBKDF2 on mobile. What still
-  runs in JavaScript — on desktop, ML-KEM-768, legacy PBKDF2 and Argon2id — is constant-time at the
+  runs in JavaScript — on desktop, ML-KEM-768 (in the main process), legacy PBKDF2 and Argon2id — is constant-time at the
   source level only, not through the JIT and GC. Practical exploitation requires a local co-resident oracle, which
-  already implies endpoint compromise. Identity keys no longer pass through the
-  JS heap (F-1b phase 1b); prekeys and ratchet keys still do (F-1b phases 2–3, §10).
+  already implies endpoint compromise. Identity keys and prekeys no longer pass
+  through the JS heap (F-1b phases 1b and 2); the per-turn ratchet keys still do
+  (F-1b phase 3, §10).
 
 ---
 

@@ -12,6 +12,7 @@
 import * as native from './native'
 import * as hashes from './hashes'
 import { boxBefore } from './boxBefore'
+import { mlkemKeygen, mlkemEncapsulate, mlkemDecapsulate } from './mlkem'
 
 type Arg = Uint8Array | number | undefined
 type OpFn = (...args: never[]) => unknown
@@ -34,6 +35,9 @@ const OPS = {
   signKeyPairFromSeed: native.signKeyPairFromSeed,
   hmacSha256: hashes.hmacSha256,
   hkdfSha256: hashes.hkdfSha256,
+  mlkemKeygen,
+  mlkemEncapsulate,
+  mlkemDecapsulate,
 } satisfies Record<string, OpFn>
 
 export type SodiumOp = keyof typeof OPS

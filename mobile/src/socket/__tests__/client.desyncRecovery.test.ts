@@ -191,7 +191,7 @@ function buildDesyncedEnvelope(me: Identity, peer: Identity, createdAtMs: number
   desyncedState.createdAtMs = createdAtMs;
   const serial = {
     RK: Array.from(desyncedState.RK),
-    DHs: { publicKey: Array.from(desyncedState.DHs.publicKey), secretKey: Array.from(desyncedState.DHs.secretKey) },
+    DHs: { publicKey: Array.from(desyncedState.DHs.publicKey), secretKey: Array.from(desyncedState.DHs.secretKey as Uint8Array) },
     DHr: desyncedState.DHr ? Array.from(desyncedState.DHr) : null,
     CKs: desyncedState.CKs ? Array.from(desyncedState.CKs) : null,
     CKr: desyncedState.CKr ? Array.from(desyncedState.CKr) : null,

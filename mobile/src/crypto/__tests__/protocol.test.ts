@@ -26,6 +26,7 @@ import {
 import { encryptMessage, openEnvelope, tryDecryptMessage } from '../messaging';
 import { stripAndPad, unpad, pickBucket } from '../metadata';
 import { vault } from '../sodium/vault';
+import { pk, pkOrNull } from './helpers/rawIdentity';
 
 function setupSession() {
   const alice = runAnonymousOnboarding(5);
@@ -33,9 +34,9 @@ function setupSession() {
 
   // Alice -> Bob: X3DH using Bob's bundle
   const x = performX3DH(alice.identity, bob.bundle);
-  const bobSpkSec = bob.secrets.signedPreKey.secretKey;
+  const bobSpkSec = pk(bob.secrets.signedPreKey.secretStored);
   const opkId = bob.bundle.oneTimePreKey?.keyId ?? null;
-  const opkSec = opkId !== null ? bob.secrets.opkSecrets.get(opkId) ?? null : null;
+  const opkSec = opkId !== null ? pkOrNull(bob.secrets.opkSecrets.get(opkId)) : null;
   const aliceEK = decodeBase64(x.myEphemeralPublicKeyB64);
   const bobRoot = performX3DHReceiver(
     bob.identity,
@@ -60,10 +61,10 @@ describe('X3DH', () => {
   it('produces identical root keys for Alice and Bob', () => {
     const { x, alice, bob } = setupSession();
     const opkId = bob.bundle.oneTimePreKey?.keyId ?? null;
-    const opkSec = opkId !== null ? bob.secrets.opkSecrets.get(opkId) ?? null : null;
+    const opkSec = opkId !== null ? pkOrNull(bob.secrets.opkSecrets.get(opkId)) : null;
     const bobRoot = performX3DHReceiver(
       bob.identity,
-      bob.secrets.signedPreKey.secretKey,
+      pk(bob.secrets.signedPreKey.secretStored),
       opkSec,
       alice.identity.publicKey,
       decodeBase64(x.myEphemeralPublicKeyB64),
@@ -392,7 +393,7 @@ describe('Anonymous onboarding', () => {
     expect(secrets.opkSecrets.size).toBe(3);
     const wireJson = JSON.stringify(registration);
     for (const [, sec] of secrets.opkSecrets) {
-      expect(wireJson).not.toContain(encodeBase64(sec));
+      expect(wireJson).not.toContain(sec);
     }
   });
 });

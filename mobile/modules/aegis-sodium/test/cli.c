@@ -111,10 +111,19 @@ static uint32_t u32(const arg_t *a) {
   return (uint32_t) a->p[0] | (uint32_t) a->p[1] << 8 | (uint32_t) a->p[2] << 16 | (uint32_t) a->p[3] << 24;
 }
 
+/* Test-only: out = src with byte `idx` set to `val` (a tampered copy of a named blob). */
+static int poke(arg_t *out, const arg_t *src, uint32_t idx, uint32_t val) {
+  if (out->len != src->len || idx >= src->len || val > 255) return -1;
+  memcpy(out->p, src->p, src->len);
+  out->p[idx] = (uint8_t) val;
+  return 0;
+}
+
 static int dispatch(const char *op, arg_t *args, int n) {
 #define OP(name, nargs, call)                                                                                        \
   if (strcmp(op, name) == 0) return n == (nargs) ? (call) : -100;
   OP("init", 0, aegis_init())
+  OP("poke", 4, poke(&args[0], &args[1], u32(&args[2]), u32(&args[3])))
   OP("randombytes", 1, aegis_randombytes(A(0)))
   OP("memcmp", 2, aegis_memcmp(A(0), A(1)))
   OP("box_keypair", 2, aegis_box_keypair(A(0), A(1)))

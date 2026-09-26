@@ -34,6 +34,7 @@ static uint32_t next_gen = 1;
 size_t aegis_vault_key_len(int type) {
   switch (type) {
     case AEGIS_KEY_X25519:
+    case AEGIS_KEY_X25519_PREKEY:
       return crypto_scalarmult_SCALARBYTES;
     case AEGIS_KEY_ED25519:
       return crypto_sign_SECRETKEYBYTES;
@@ -49,6 +50,7 @@ size_t aegis_vault_key_len(int type) {
 size_t aegis_vault_pub_len(int type) {
   switch (type) {
     case AEGIS_KEY_X25519:
+    case AEGIS_KEY_X25519_PREKEY:
       return crypto_scalarmult_BYTES;
     case AEGIS_KEY_ED25519:
       return crypto_sign_PUBLICKEYBYTES;
@@ -182,6 +184,7 @@ static int public_of(int type, const uint8_t *secret, uint8_t *pub, size_t puble
   if (publen != want || pub == NULL) return AEGIS_EBADLEN;
   switch (type) {
     case AEGIS_KEY_X25519:
+    case AEGIS_KEY_X25519_PREKEY:
       return crypto_scalarmult_base(pub, secret) == 0 ? AEGIS_OK : AEGIS_EFAIL;
     case AEGIS_KEY_ED25519:
       memcpy(pub, secret + crypto_sign_SEEDBYTES, crypto_sign_PUBLICKEYBYTES);
@@ -194,20 +197,21 @@ static int public_of(int type, const uint8_t *secret, uint8_t *pub, size_t puble
   }
 }
 
-/* blob = "AV" | 1 | type | nonce | secretbox(slotlen | slot | secret). Slot and KEK readable by caller. */
+/* blob = "AV" | 2 | type | nonce | secretbox(type | slotlen | slot | secret). Slot and KEK readable by caller. */
 static int wrap(uint8_t *blob, size_t bloblen, int slot, int type, const uint8_t *secret, size_t len) {
-  size_t slotlen = slots[slot].slotlen, plen = 1 + slotlen + len;
+  size_t slotlen = slots[slot].slotlen, plen = 2 + slotlen + len;
   uint8_t *plain;
   int rc;
   if (bloblen != AEGIS_VAULT_BLOB_LEN(slotlen, len) || blob == NULL) return AEGIS_EBADLEN;
   plain = sodium_malloc(plen);
   if (plain == NULL) return AEGIS_EFAIL;
-  plain[0] = (uint8_t) slotlen;
-  memcpy(plain + 1, slots[slot].slot, slotlen);
-  memcpy(plain + 1 + slotlen, secret, len);
+  plain[0] = (uint8_t) type;
+  plain[1] = (uint8_t) slotlen;
+  memcpy(plain + 2, slots[slot].slot, slotlen);
+  memcpy(plain + 2 + slotlen, secret, len);
   blob[0] = 'A';
   blob[1] = 'V';
-  blob[2] = 1;
+  blob[2] = AEGIS_VAULT_BLOB_VERSION;
   blob[3] = (uint8_t) type;
   randombytes_buf(blob + 4, crypto_secretbox_NONCEBYTES);
   sodium_mprotect_readonly(slots[slot].kek);
@@ -242,6 +246,7 @@ static int random_secret(int type, uint8_t *secret) {
   uint8_t sign_pk[crypto_sign_PUBLICKEYBYTES];
   switch (type) {
     case AEGIS_KEY_X25519:
+    case AEGIS_KEY_X25519_PREKEY:
     case AEGIS_KEY_SECRET32:
       randombytes_buf(secret, 32);
       return AEGIS_OK;
@@ -308,13 +313,13 @@ int aegis_vault_load(uint32_t *handle, int *type, uint8_t *pub, size_t publen, c
   size_t plen, len;
   int s, t, k, rc;
   if (handle == NULL || type == NULL || blob == NULL || !slot_args_ok(slot, slotlen)) return AEGIS_EBADLEN;
-  if (bloblen < AEGIS_VAULT_BLOB_HEADER + crypto_secretbox_MACBYTES + 1 || blob[0] != 'A' || blob[1] != 'V' ||
-      blob[2] != 1)
+  if (bloblen < AEGIS_VAULT_BLOB_HEADER + crypto_secretbox_MACBYTES + 2 || blob[0] != 'A' || blob[1] != 'V' ||
+      blob[2] != AEGIS_VAULT_BLOB_VERSION)
     return AEGIS_EBADLEN;
   t = blob[3];
   len = aegis_vault_key_len(t);
   if (len == 0 || bloblen != AEGIS_VAULT_BLOB_LEN(slotlen, len)) return AEGIS_EBADLEN;
-  plen = 1 + slotlen + len;
+  plen = 2 + slotlen + len;
   plain = sodium_malloc(plen);
   if (plain == NULL) return AEGIS_EFAIL;
   pthread_mutex_lock(&mu);
@@ -328,11 +333,15 @@ int aegis_vault_load(uint32_t *handle, int *type, uint8_t *pub, size_t publen, c
              ? AEGIS_OK
              : AEGIS_EVERIFY;
     sodium_mprotect_noaccess(slots[s].kek);
-    /* The slot inside the box must be this one: a blob of another profile never loads here. */
-    if (rc == AEGIS_OK && (plain[0] != slotlen || sodium_memcmp(plain + 1, slot, slotlen) != 0)) rc = AEGIS_EVERIFY;
-    if (rc == AEGIS_OK) rc = public_of(t, plain + 1 + slotlen, pub, publen);
+    /* The type and slot inside the box must be the header's type and this slot:
+     * a blob of another profile never loads here, and an edited header type
+     * (say, an identity key relabelled as a prekey) never loads at all. */
+    if (rc == AEGIS_OK && (plain[0] != (uint8_t) t || plain[1] != slotlen ||
+                           sodium_memcmp(plain + 2, slot, slotlen) != 0))
+      rc = AEGIS_EVERIFY;
+    if (rc == AEGIS_OK) rc = public_of(t, plain + 2 + slotlen, pub, publen);
     if (rc == AEGIS_OK) {
-      k = store_key(s, t, plain + 1 + slotlen, len);
+      k = store_key(s, t, plain + 2 + slotlen, len);
       if (k < 0) {
         rc = AEGIS_EFAIL;
       } else {
@@ -396,13 +405,19 @@ int aegis_vault_release(uint32_t handle) {
   return k >= 0 ? AEGIS_OK : AEGIS_ENOKEY;
 }
 
+/* A key of type `have` serves an operation that wants `want`: exact, except
+ * that an X25519 prekey does every X25519 operation. */
+static int type_ok(int have, int want) {
+  return have == want || (want == AEGIS_KEY_X25519 && have == AEGIS_KEY_X25519_PREKEY);
+}
+
 /* Run `op` with the key of `handle` readable; ENOKEY if the handle is dead or not of `type`. */
 #define WITH_KEY(handle, want_type, body)                                                                            \
   do {                                                                                                               \
     int k_;                                                                                                          \
     pthread_mutex_lock(&mu);                                                                                         \
     k_ = key_index(handle);                                                                                          \
-    if (k_ < 0 || keys[k_].type != (want_type)) {                                                                    \
+    if (k_ < 0 || !type_ok(keys[k_].type, (want_type))) {                                                                    \
       rc = AEGIS_ENOKEY;                                                                                             \
     } else {                                                                                                         \
       const uint8_t *key = keys[k_].secret;                                                                          \
@@ -453,8 +468,20 @@ int aegis_vault_mlkem768_dec(uint32_t handle, uint8_t *ss, size_t sslen, const u
 int aegis_vault_export(uint32_t handle, int type, uint8_t *out, size_t outlen) {
   int rc = AEGIS_OK;
   size_t len = aegis_vault_key_len(type);
+  int k;
   if (len == 0 || out == NULL || outlen != len) return AEGIS_EBADLEN;
-  WITH_KEY(handle, type, memcpy(out, key, len));
+  /* Exact type (no prekey-for-identity substitution): a platform's export
+   * policy keys off the declared type. */
+  pthread_mutex_lock(&mu);
+  k = key_index(handle);
+  if (k < 0 || keys[k].type != type) {
+    rc = AEGIS_ENOKEY;
+  } else {
+    sodium_mprotect_readonly(keys[k].secret);
+    memcpy(out, keys[k].secret, len);
+    sodium_mprotect_noaccess(keys[k].secret);
+  }
+  pthread_mutex_unlock(&mu);
   return rc;
 }
 

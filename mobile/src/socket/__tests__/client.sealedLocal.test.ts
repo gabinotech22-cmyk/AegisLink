@@ -274,7 +274,7 @@ const settle = async () => { for (let i = 0; i < 30; i++) await flush(); };
 function persistSession(aegisId: string, state: RatchetState): void {
   const serial = {
     RK: Array.from(state.RK),
-    DHs: { publicKey: Array.from(state.DHs.publicKey), secretKey: Array.from(state.DHs.secretKey) },
+    DHs: { publicKey: Array.from(state.DHs.publicKey), secretKey: Array.from(state.DHs.secretKey as Uint8Array) },
     DHr: state.DHr ? Array.from(state.DHr) : null,
     CKs: state.CKs ? Array.from(state.CKs) : null,
     CKr: state.CKr ? Array.from(state.CKr) : null,

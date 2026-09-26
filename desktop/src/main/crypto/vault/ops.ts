@@ -16,9 +16,16 @@ export type VaultResult =
   | { ok: true; value: unknown }
   | { ok: false; code: 'NOKEY' | 'REJECTED' | 'BAD_ARG' | 'DENIED' | 'FAIL'; message: string }
 
-/** Why a raw key may leave the vault: the explicit exports of design doc §5. */
+/**
+ * Why a raw key may leave the vault: the explicit exports of design doc §5.
+ * 'backup' / 'recoveryPhrase' need the user's consent (native dialog);
+ * 'deviceSync' is the SPK going to our own linked devices after a rotation —
+ * prekeys ONLY (exact type 'x25519prekey', authenticated in the blob), so it
+ * can never carry the identity key and runs without a dialog.
+ */
 export type ExportPurpose = 'backup' | 'recoveryPhrase'
-const PURPOSES: ReadonlySet<string> = new Set(['backup', 'recoveryPhrase'])
+type AnyPurpose = ExportPurpose | 'deviceSync'
+const PURPOSES: ReadonlySet<string> = new Set(['backup', 'recoveryPhrase', 'deviceSync'])
 
 /**
  * Hooks the IPC layer supplies. `confirmExport` asks the USER, in a native
@@ -34,7 +41,7 @@ const NO_EXPORTS: VaultHooks = { confirmExport: () => false }
 
 class DeniedError extends Error {}
 
-const TYPES: ReadonlySet<string> = new Set(['x25519', 'ed25519', 'mlkem768', 'secret32'])
+const TYPES: ReadonlySet<string> = new Set(['x25519', 'ed25519', 'mlkem768', 'secret32', 'x25519prekey'])
 const MAX_ARG_BYTES = 16 * 1024 * 1024
 
 const str = (v: unknown): string => {
@@ -79,7 +86,11 @@ const OPS: Record<string, Op> = {
     if (typeof purpose !== 'string' || !PURPOSES.has(purpose)) throw new VaultError('BAD_ARG', 'bad export purpose')
     const t = type(a[1])
     const handle = num(a[0])
-    if (!h.confirmExport(purpose as ExportPurpose)) throw new DeniedError('vault: export not confirmed by the user')
+    if ((purpose as AnyPurpose) === 'deviceSync') {
+      if (t !== 'x25519prekey') throw new VaultError('BAD_ARG', 'deviceSync exports prekeys only')
+    } else if (!h.confirmExport(purpose as ExportPurpose)) {
+      throw new DeniedError('vault: export not confirmed by the user')
+    }
     return v.exportSecret(handle, t)
   },
   release: (v, a) => v.release(num(a[0])),

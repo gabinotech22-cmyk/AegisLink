@@ -19,6 +19,7 @@ import { runAnonymousOnboarding } from '../onboarding';
 import { performX3DH, performX3DHReceiver, generatePreKeys } from '../signal/x3dh';
 import { initRatchet, ratchetDecrypt, type RatchetState } from '../signal/ratchet';
 import { encryptMessage, openEnvelope, parseRatchetHeader } from '../messaging';
+import { pk, pkOrNull } from './helpers/rawIdentity';
 
 function newHybridPair(): {
   alice: ReturnType<typeof runAnonymousOnboarding>;
@@ -50,13 +51,13 @@ function newHybridPair(): {
   expect(x.version).toBe(2); // sanity: PQXDH negotiated
   const bobRoot = performX3DHReceiver(
     bob.identity,
-    bobPreKeys.signedPreKey.secretKey,
+    pk(bobPreKeys.signedPreKey.secretStored),
     null,
     alice.identity.publicKey,
     decodeBase64(x.myEphemeralPublicKeyB64),
     {
       cipherText: decodeBase64(x.pqCiphertextB64!),
-      pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+      pqSpkSecret: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768'),
     },
   );
 
@@ -68,8 +69,8 @@ function newHybridPair(): {
     bobRoot,
     new Uint8Array(),
     false,
-    { publicKey: bobSpkPub, secretKey: bobPreKeys.signedPreKey.secretKey },
-    { publicKey: bobPqPub, secretKey: bobPreKeys.pqSignedPreKey.secretKey },
+    { publicKey: bobSpkPub, secretKey: pk(bobPreKeys.signedPreKey.secretStored) },
+    { publicKey: bobPqPub, secretKey: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768') },
     null,
   );
   return { alice, bob, aliceState, bobState };

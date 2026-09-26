@@ -5,6 +5,7 @@ import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'ex
 import { ss } from '../utils/secureStore';
 import { nacl, type BoxKeyPair } from '../crypto/sodium';
 import { exportIdentitySecrets } from '../crypto/identity';
+import { exportSpkForLinkedDevice } from '../crypto/signal/x3dh';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -198,7 +199,7 @@ export function DevicesScreen({ onBack }: Props) {
             secretKeyB64: encodeBase64(secrets.secretKey),
             signingPublicKeyB64: identity.signingPublicKeyB64,
             signingSecretKeyB64: encodeBase64(secrets.signingSecretKey),
-            spkSecretB64: latestSpk?.b64,
+            spkSecretB64: latestSpk ? exportSpkForLinkedDevice(identity.secretKey.slot, latestSpk.b64) : undefined,
             spkId: latestSpk?.keyId,
           }),
         );

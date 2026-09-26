@@ -140,7 +140,7 @@ async function doPublishToServer(identity: Identity, slotId: string, relayBaseUr
     // broadcastProfileUpdate pattern above.
     const { persistPrekeySecrets, persistPqSpkSecret } = await import('../socket/client');
     const persisted = await persistPrekeySecrets({
-      signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
+      signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretStored: preKeys.signedPreKey.secretStored },
       opkSecrets: preKeys.opkSecrets,
     });
     if (!persisted) {
@@ -153,13 +153,13 @@ async function doPublishToServer(identity: Identity, slotId: string, relayBaseUr
     // advertising a PQ prekey we cannot decapsulate later.
     const pqSpkOk = await persistPqSpkSecret(
       preKeys.pqSignedPreKey.keyId,
-      preKeys.pqSignedPreKey.secretKey,
+      preKeys.pqSignedPreKey.secretStored,
     );
 
     const result = await uploadIdentityAndPrekeys(
       identity,
       {
-        signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretKey: preKeys.signedPreKey.secretKey },
+        signedPreKey: { keyId: preKeys.signedPreKey.keyId, secretStored: preKeys.signedPreKey.secretStored },
         opkSecrets: preKeys.opkSecrets,
       },
       base,

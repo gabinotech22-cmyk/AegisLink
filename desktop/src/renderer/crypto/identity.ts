@@ -1,5 +1,7 @@
-import { vault, type VaultKey, type VaultKeyType, type VaultExportPurpose } from './sodium/vault';
+import { vault, toStored, isVaultStored, type VaultKey, type VaultExportPurpose } from './sodium/vault';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+
+export { isVaultStored };
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -55,16 +57,7 @@ export interface Identity {
   createdAt: number;
 }
 
-/**
- * Persisted key: "vault1:" + base64(blob). A value without the prefix is a raw
- * key stored before F-1b (base64), migrated on load.
- */
-const STORED_PREFIX = 'vault1:';
-
-export const isVaultStored = (stored: string): boolean => stored.startsWith(STORED_PREFIX);
-const toStored = (blob: Uint8Array): string => STORED_PREFIX + encodeBase64(blob);
-
-function build(key: VaultKey, keyBlob: Uint8Array, sign: VaultKey, signBlob: Uint8Array, createdAt: number): Identity {
+function build(key: VaultKey, keyStored: string, sign: VaultKey, signStored: string, createdAt: number): Identity {
   return {
     aegisId: deriveAegisId(key.publicKey),
     publicKey: key.publicKey,
@@ -73,8 +66,8 @@ function build(key: VaultKey, keyBlob: Uint8Array, sign: VaultKey, signBlob: Uin
     signingPublicKey: sign.publicKey,
     signingPublicKeyB64: encodeBase64(sign.publicKey),
     signingSecretKey: sign,
-    secretKeyStored: toStored(keyBlob),
-    signingSecretKeyStored: toStored(signBlob),
+    secretKeyStored: keyStored,
+    signingSecretKeyStored: signStored,
     createdAt,
   };
 }
@@ -87,7 +80,7 @@ function build(key: VaultKey, keyBlob: Uint8Array, sign: VaultKey, signBlob: Uin
 export function createIdentity(slot = 'self'): Identity {
   const x = vault.generate(slot, 'x25519');
   const e = vault.deriveEd25519(x.key);
-  return build(x.key, x.blob, e.key, e.blob, Date.now());
+  return build(x.key, toStored(x.blob), e.key, toStored(e.blob), Date.now());
 }
 
 /**
@@ -106,7 +99,7 @@ export function importIdentity(slot: string, boxSecret: Uint8Array, signSecret: 
       vault.release(x.key);
       throw err;
     }
-    return build(x.key, x.blob, e.key, e.blob, createdAt);
+    return build(x.key, toStored(x.blob), e.key, toStored(e.blob), createdAt);
   } finally {
     boxSecret.fill(0);
     signSecret?.fill(0);
@@ -120,7 +113,7 @@ export function moveIdentity(identity: Identity, slot: string): Identity {
   const e = vault.copy(identity.signingSecretKey, slot);
   vault.release(identity.secretKey);
   vault.release(identity.signingSecretKey);
-  return build(x.key, x.blob, e.key, e.blob, identity.createdAt);
+  return build(x.key, toStored(x.blob), e.key, toStored(e.blob), identity.createdAt);
 }
 
 /**
@@ -146,15 +139,6 @@ function constantTimeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
   return diff === 0;
 }
 
-/** A persisted key into a handle: a vault blob loads; a raw pre-F-1b key is imported (migration). */
-function openStored(slot: string, type: VaultKeyType, stored: string): { key: VaultKey; blob: Uint8Array } {
-  if (isVaultStored(stored)) {
-    const blob = decodeBase64(stored.slice(STORED_PREFIX.length));
-    return { key: vault.load(slot, blob), blob };
-  }
-  return vault.import(slot, type, decodeBase64(stored));
-}
-
 /**
  * The identity of profile `slot` (unlocked) from its persisted form. Keys
  * stored before F-1b (raw base64) are imported into the vault here; the result
@@ -171,7 +155,7 @@ export function identityFromStored(
   },
   slot = 'self',
 ): Identity {
-  const x = openStored(slot, 'x25519', opts.secretKeyStored);
+  const x = vault.openStored(slot, 'x25519', opts.secretKeyStored);
 
   // Integrity check: publicKeyB64 and the secret are written to two different
   // stores (SQLite vs SecureStore) by two separate operations in saveIdentity —
@@ -191,10 +175,10 @@ export function identityFromStored(
   // from the box secret key, exactly as createIdentity does. A throwaway RANDOM
   // pair would produce signatures no contact can verify (sealed-sender rejects
   // everything) AND would mask a corrupted/half-written identity as valid.
-  let e: { key: VaultKey; blob: Uint8Array };
+  let e: { key: VaultKey; stored: string };
   if (opts.signingPublicKeyB64 && opts.signingSecretKeyStored) {
     try {
-      e = openStored(slot, 'ed25519', opts.signingSecretKeyStored);
+      e = vault.openStored(slot, 'ed25519', opts.signingSecretKeyStored);
     } catch (err) {
       vault.release(x.key);
       // Importing an Ed25519 secret checks that its embedded public half is
@@ -213,7 +197,8 @@ export function identityFromStored(
       throw new Error('identity corrupted: signingSecretKey does not match signingPublicKeyB64');
     }
   } else {
-    e = vault.deriveEd25519(x.key);
+    const d = vault.deriveEd25519(x.key);
+    e = { key: d.key, stored: toStored(d.blob) };
   }
-  return build(x.key, x.blob, e.key, e.blob, opts.createdAt);
+  return build(x.key, x.stored, e.key, e.stored, opts.createdAt);
 }

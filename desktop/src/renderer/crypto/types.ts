@@ -56,9 +56,14 @@ export interface PreKeyBundle {
   oneTimePreKey: OneTimePreKeyPublic | null;
 }
 
+/**
+ * Local secret material backing a PreKeyBundle. Stays on device, and only in
+ * its persisted form: key-vault blobs of the identity's profile (F-1b phase 2).
+ */
 export interface PreKeySecrets {
-  signedPreKey: { keyId: number; secretKey: Uint8Array };
-  opkSecrets: Map<number, Uint8Array>;
+  signedPreKey: { keyId: number; secretStored: string };
+  /** keyId -> persisted OPK secret (vault blob). */
+  opkSecrets: Map<number, string>;
 }
 
 export interface X3DHInitParams {

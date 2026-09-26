@@ -209,7 +209,7 @@ function buildResetNudge(me: Identity, peer: Identity) {
   meSession.createdAtMs = Date.now() - 120_000;
   const serial = {
     RK: Array.from(meSession.RK),
-    DHs: { publicKey: Array.from(meSession.DHs.publicKey), secretKey: Array.from(meSession.DHs.secretKey) },
+    DHs: { publicKey: Array.from(meSession.DHs.publicKey), secretKey: Array.from(meSession.DHs.secretKey as Uint8Array) },
     DHr: meSession.DHr ? Array.from(meSession.DHr) : null,
     CKs: meSession.CKs ? Array.from(meSession.CKs) : null,
     CKr: meSession.CKr ? Array.from(meSession.CKr) : null,

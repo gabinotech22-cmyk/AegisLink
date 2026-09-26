@@ -5,13 +5,22 @@
  * stop at the first differing character the way `===` on strings does.
  *
  * Returns false for a missing or undecodable value. Different lengths return
- * false after the same constant-time pass as an equal-length compare.
+ * false after the same constant-time pass as an equal-length compare. Also
+ * compares key-vault persisted forms ("vault1:" + base64 blob, F-1b): a raw
+ * secret never equals a blob.
  */
 import { decodeBase64 } from 'tweetnacl-util';
 import { nacl } from './sodium';
 
 export function secretB64Equals(stored: string | null | undefined, expected: string): boolean {
   if (typeof stored !== 'string') return false;
+  const VAULT = 'vault1:';
+  const vs = stored.startsWith(VAULT);
+  if (vs !== expected.startsWith(VAULT)) return false;
+  if (vs) {
+    stored = stored.slice(VAULT.length);
+    expected = expected.slice(VAULT.length);
+  }
   let a: Uint8Array;
   let b: Uint8Array;
   try {

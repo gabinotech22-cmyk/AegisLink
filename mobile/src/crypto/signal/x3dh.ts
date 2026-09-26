@@ -1,5 +1,6 @@
 import { nacl, ml_kem768 } from '../sodium';
 import { vault } from '../sodium/vault';
+import { dhWith, decapsulateWith, isVaultKey, type SecretRef } from '../sodium/secretRef';
 import { logger } from '../../utils/logger';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { hkdfSHA256 } from './kdf';
@@ -307,8 +308,8 @@ export function performX3DH(
 export interface X3DHReceiverPqInputs {
   /** ML-KEM-768 ciphertext (raw bytes) Alice sent, to be decapsulated. */
   cipherText: Uint8Array;
-  /** This device's ML-KEM-768 PQSPK secret key (2400 bytes). Never leaves device. */
-  pqSpkSecret: Uint8Array;
+  /** This device's ML-KEM-768 PQSPK: a vault handle in the app (raw 2400 bytes in tests / golden vectors). */
+  pqSpkSecret: SecretRef;
 }
 
 /**
@@ -333,15 +334,15 @@ export interface X3DHReceiverPqInputs {
  */
 export function performX3DHReceiver(
   myIdentity: Identity,
-  mySpkSecret: Uint8Array,
-  myOpkSecret: Uint8Array | null,
+  mySpkSecret: SecretRef,
+  myOpkSecret: SecretRef | null,
   aliceIK: Uint8Array,
   aliceEK: Uint8Array,
   pq?: X3DHReceiverPqInputs | null,
 ): Uint8Array {
   // Intermediates zeroized in `finally` below. NOTE: mySpkSecret/myOpkSecret
-  // are caller-owned (the SPK in particular is reused
-  // across many incoming handshakes) and must NOT be zeroized here.
+  // are caller-owned (vault handles in the app; the SPK in particular is reused
+  // across many incoming handshakes) and must NOT be zeroized or released here.
   let dh1: Uint8Array | undefined;
   let dh2: Uint8Array | undefined;
   let dh3: Uint8Array | undefined;
@@ -352,9 +353,9 @@ export function performX3DHReceiver(
 
   try {
     // Mirror sender's DH order: DH1=DH(SPK,IK_alice), DH2=DH(IK,EK_alice), DH3=DH(SPK,EK_alice)
-    dh1 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceIK), 'DH1');
+    dh1 = assertNonZeroDH(dhWith(mySpkSecret, aliceIK), 'DH1');
     dh2 = assertNonZeroDH(vault.scalarMult(myIdentity.secretKey, aliceEK), 'DH2');
-    dh3 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceEK), 'DH3');
+    dh3 = assertNonZeroDH(dhWith(mySpkSecret, aliceEK), 'DH3');
 
     // Signal spec: prepend 32 bytes of 0xFF
     const F = new Uint8Array(32).fill(0xFF);
@@ -365,7 +366,7 @@ export function performX3DHReceiver(
     dhOut.set(dh3, F.length + dh1.length + dh2.length);
 
     if (myOpkSecret) {
-      dh4 = assertNonZeroDH(nacl.scalarMult(myOpkSecret, aliceEK), 'DH4');
+      dh4 = assertNonZeroDH(dhWith(myOpkSecret, aliceEK), 'DH4');
       const newDhOut = new Uint8Array(dhOut.length + dh4.length);
       newDhOut.set(dhOut, 0);
       newDhOut.set(dh4, dhOut.length);
@@ -377,13 +378,13 @@ export function performX3DHReceiver(
       if (pq.cipherText.length !== MLKEM768_CIPHERTEXT_BYTES) {
         throw new Error('PQXDH: Invalid ML-KEM-768 ciphertext length');
       }
-      if (pq.pqSpkSecret.length !== MLKEM768_SECRETKEY_BYTES) {
+      if (isVaultKey(pq.pqSpkSecret) ? pq.pqSpkSecret.type !== 'mlkem768' : pq.pqSpkSecret.length !== MLKEM768_SECRETKEY_BYTES) {
         throw new Error('PQXDH: Invalid ML-KEM-768 secret key length');
       }
       // ML-KEM decapsulation is implicit-rejection: a tampered ciphertext does NOT
       // throw, it yields a DIFFERENT (pseudo-random) shared secret. That is exactly
       // what makes the tamper test work — Bob's root key diverges from Alice's.
-      sharedSecret = ml_kem768.decapsulate(pq.cipherText, pq.pqSpkSecret);
+      sharedSecret = decapsulateWith(pq.cipherText, pq.pqSpkSecret);
       assertNonZeroSharedSecret(sharedSecret, 'PQXDH decapsulate');
       combined = new Uint8Array(dhOut.length + sharedSecret.length);
       combined.set(dhOut, 0);
@@ -454,25 +455,51 @@ export function shouldUsePqReceiver(
   return 'v1';
 }
 
+/**
+ * The device's prekeys (F-1b phase 2): public material for the bundle, and the
+ * secrets ONLY in their persisted form — vault blobs of the identity's profile
+ * ("vault1:…", `toStored`). The raw secrets never exist in JavaScript; the
+ * receiver loads a blob into a handle when a handshake needs it.
+ */
 export interface DevicePreKeySet {
   signedPreKey: {
     keyId: number;
     publicKeyB64: string;
     signatureB64: string;
-    secretKey: Uint8Array;
+    secretStored: string;
   };
   oneTimePreKeys: { keyId: number; publicKeyB64: string }[];
-  opkSecrets: Map<number, Uint8Array>;
+  /** keyId → persisted OPK secret (vault blob). */
+  opkSecrets: Map<number, string>;
   /**
    * PQXDH signed PQ prekey (ML-KEM-768). publicKeyB64 + signatureB64 go in the
-   * published bundle; secretKey (2400 bytes) stays on-device only.
+   * published bundle; the 2400-byte secret stays in the vault.
    */
   pqSignedPreKey: {
     keyId: number;
     publicKeyB64: string;
     signatureB64: string;
-    secretKey: Uint8Array;
+    secretStored: string;
   };
+}
+
+/** A fresh vault key of the identity's profile: its public half and persisted form (the handle is released). */
+function freshPrekey(slot: string, type: 'x25519prekey' | 'mlkem768'): { publicKey: Uint8Array; stored: string } {
+  let k: ReturnType<typeof vault.generateStored>;
+  try {
+    k = vault.generateStored(slot, type);
+  } catch (e) {
+    throw tagError(type === 'mlkem768' ? 'ml_kem768.keygen' : 'prekey keygen', e);
+  }
+  vault.release(k.key);
+  return { publicKey: k.key.publicKey, stored: k.stored };
+}
+
+/** The public half and (possibly migrated) persisted form of a stored prekey; the handle is released. */
+function storedPrekey(slot: string, type: 'x25519prekey' | 'mlkem768', stored: string): { publicKey: Uint8Array; stored: string } {
+  const k = vault.openStored(slot, type, stored);
+  vault.release(k.key);
+  return { publicKey: k.key.publicKey, stored: k.stored };
 }
 
 export function generatePreKeys(
@@ -482,30 +509,26 @@ export function generatePreKeys(
   spkKeyId = 1,
   pqSpkKeyId = 1,
 ): DevicePreKeySet {
+  const slot = identity.secretKey.slot;
   // Signed PreKey
-  const spk = nacl.box.keyPair();
+  const spk = freshPrekey(slot, 'x25519prekey');
   const signature = vault.sign(identity.signingSecretKey, spk.publicKey);
 
   // Signed PQ PreKey (ML-KEM-768), signed with the SAME Ed25519 identity key.
-  let pq: ReturnType<typeof ml_kem768.keygen>;
-  try {
-    pq = ml_kem768.keygen();
-  } catch (e) {
-    throw tagError('ml_kem768.keygen', e);
-  }
+  const pq = freshPrekey(slot, 'mlkem768');
   const pqSignature = vault.sign(identity.signingSecretKey, pq.publicKey);
 
   const oneTimePreKeys: { keyId: number; publicKeyB64: string }[] = [];
-  const opkSecrets = new Map<number, Uint8Array>();
+  const opkSecrets = new Map<number, string>();
 
   for (let i = 0; i < count; i++) {
-    const opk = nacl.box.keyPair();
+    const opk = freshPrekey(slot, 'x25519prekey');
     const keyId = startOpkId + i;
     oneTimePreKeys.push({
       keyId,
       publicKeyB64: encodeBase64(opk.publicKey)
     });
-    opkSecrets.set(keyId, opk.secretKey);
+    opkSecrets.set(keyId, opk.stored);
   }
 
   return {
@@ -513,7 +536,7 @@ export function generatePreKeys(
       keyId: spkKeyId,
       publicKeyB64: encodeBase64(spk.publicKey),
       signatureB64: encodeBase64(signature),
-      secretKey: spk.secretKey
+      secretStored: spk.stored,
     },
     oneTimePreKeys,
     opkSecrets,
@@ -521,68 +544,85 @@ export function generatePreKeys(
       keyId: pqSpkKeyId,
       publicKeyB64: encodeBase64(pq.publicKey),
       signatureB64: encodeBase64(pqSignature),
-      secretKey: pq.secretKey,
+      secretStored: pq.stored,
     },
   };
 }
 
 /**
- * Rebuild a DevicePreKeySet (public material + secrets) from persisted SECRETS.
+ * Rebuild a DevicePreKeySet (public material + persisted secrets) from the
+ * persisted SECRETS.
  *
- * X25519 public keys are derived deterministically from their secret via
- * `nacl.scalarMult.base(secret)`; the SPK signature is recomputed with the
- * identity's Ed25519 signing key. This guarantees the public material we
- * (re)publish ALWAYS corresponds to the secrets in the durable DB — the
- * single-source-of-truth invariant that fixes the root-key divergence caused
- * by concurrent independent `generatePreKeys` calls.
+ * The vault computes each public key from its secret (X25519 base point; the
+ * ML-KEM-768 secret embeds its public key, FIPS 203 sk = ek || …); the SPK and
+ * PQSPK signatures are recomputed with the identity's Ed25519 key. This
+ * guarantees the public material we (re)publish ALWAYS corresponds to the
+ * secrets in the durable DB — the single-source-of-truth invariant that fixes
+ * the root-key divergence caused by concurrent independent `generatePreKeys`
+ * calls. Secrets stored raw before F-1b come back in their vault form, so the
+ * caller re-persists them (one-time migration).
  */
 function reconstructPreKeySetFromSecrets(
   identity: Identity,
   spkKeyId: number,
-  spkSecret: Uint8Array,
-  opkSecretsB64: Map<number, string>,
+  spkStored: string,
+  opkStored: Map<number, string>,
   pqSpkKeyId: number,
-  pqSpkSecret: Uint8Array,
+  pqSpkStored: string,
 ): DevicePreKeySet {
-  const spkPublic = nacl.scalarMult.base(spkSecret);
-  const signature = vault.sign(identity.signingSecretKey, spkPublic);
+  const slot = identity.secretKey.slot;
+  const spk = storedPrekey(slot, 'x25519prekey', spkStored);
+  const signature = vault.sign(identity.signingSecretKey, spk.publicKey);
 
-  // ML-KEM-768 secret keys embed their public key (FIPS 203 sk = ek || …), so
-  // getPublicKey deterministically recovers the SAME pubkey we first published;
-  // re-signing with the identity key reproduces the exact bundle material. This
-  // keeps the single-source-of-truth invariant for the PQSPK too.
-  const pqSpkPublic = ml_kem768.getPublicKey(pqSpkSecret);
-  const pqSignature = vault.sign(identity.signingSecretKey, pqSpkPublic);
+  const pq = storedPrekey(slot, 'mlkem768', pqSpkStored);
+  const pqSignature = vault.sign(identity.signingSecretKey, pq.publicKey);
 
   const oneTimePreKeys: { keyId: number; publicKeyB64: string }[] = [];
-  const opkSecrets = new Map<number, Uint8Array>();
+  const opkSecrets = new Map<number, string>();
   // Stable ascending order so the published bundle is deterministic.
-  const keyIds = Array.from(opkSecretsB64.keys()).sort((a, b) => a - b);
+  const keyIds = Array.from(opkStored.keys()).sort((a, b) => a - b);
   for (const keyId of keyIds) {
-    const secret = decodeBase64(opkSecretsB64.get(keyId)!);
-    oneTimePreKeys.push({
-      keyId,
-      publicKeyB64: encodeBase64(nacl.scalarMult.base(secret)),
-    });
-    opkSecrets.set(keyId, secret);
+    const opk = storedPrekey(slot, 'x25519prekey', opkStored.get(keyId)!);
+    oneTimePreKeys.push({ keyId, publicKeyB64: encodeBase64(opk.publicKey) });
+    opkSecrets.set(keyId, opk.stored);
   }
 
   return {
     signedPreKey: {
       keyId: spkKeyId,
-      publicKeyB64: encodeBase64(spkPublic),
+      publicKeyB64: encodeBase64(spk.publicKey),
       signatureB64: encodeBase64(signature),
-      secretKey: spkSecret,
+      secretStored: spk.stored,
     },
     oneTimePreKeys,
     opkSecrets,
     pqSignedPreKey: {
       keyId: pqSpkKeyId,
-      publicKeyB64: encodeBase64(pqSpkPublic),
+      publicKeyB64: encodeBase64(pq.publicKey),
       signatureB64: encodeBase64(pqSignature),
-      secretKey: pqSpkSecret,
+      secretStored: pq.stored,
     },
   };
+}
+
+/**
+ * The raw SPK secret (base64) of a persisted SPK, for the user's OWN linked
+ * devices only: device link (screens/Devices.tsx) and the SPK sync after a
+ * rotation (socket/client.ts) — both box it to a device key right after. An
+ * explicit export (F-1b design doc §5); vaultExport.guard allowlists this file.
+ */
+export function exportSpkForLinkedDevice(slot: string, spkStored: string): string {
+  const { key } = vault.openStored(slot, 'x25519prekey', spkStored);
+  try {
+    const raw = vault.exportSecret(key);
+    try {
+      return encodeBase64(raw);
+    } finally {
+      raw.fill(0);
+    }
+  } finally {
+    vault.release(key);
+  }
 }
 
 // ── Single-source-of-truth device prekey set ────────────────────────────────
@@ -601,9 +641,9 @@ const ensurePreKeysInFlight = new Map<string, Promise<DevicePreKeySet>>();
 async function persistPqSpkWithReadback(
   db: typeof import('../../db/local'),
   keyId: number,
-  secret: Uint8Array,
+  stored: string,
 ): Promise<boolean> {
-  const b64 = encodeBase64(secret);
+  const b64 = stored;
   let lastErr: unknown = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -662,27 +702,21 @@ export async function ensureDevicePreKeys(identity: Identity): Promise<DevicePre
         // prekeys (preserving in-flight v1 sessions). If persistence fails we
         // refuse to publish a PQSPK we can't read back, just like the SPK.
         let pqSpkKeyId = await db.getPqSpkKeyId();
-        let pqSpkSecret: Uint8Array | null = null;
+        let pqSpkStored: string | null = null;
         if (pqSpkKeyId !== null) {
-          const pqB64 = await db.loadPqSpkSecret(pqSpkKeyId);
-          if (pqB64) pqSpkSecret = decodeBase64(pqB64);
+          pqSpkStored = await db.loadPqSpkSecret(pqSpkKeyId);
         }
-        if (!pqSpkSecret) {
-          let pq: ReturnType<typeof ml_kem768.keygen>;
-          try {
-            pq = ml_kem768.keygen();
-          } catch (e) {
-            throw tagError('ml_kem768.keygen', e);
-          }
+        if (!pqSpkStored) {
+          const pq = freshPrekey(identity.secretKey.slot, 'mlkem768');
           const newPqKeyId = (pqSpkKeyId ?? 0) + 1;
-          const ok = await persistPqSpkWithReadback(db, newPqKeyId, pq.secretKey);
+          const ok = await persistPqSpkWithReadback(db, newPqKeyId, pq.stored);
           if (!ok) {
             throw new Error(
               `ensureDevicePreKeys: could not persist PQSPK secret for keyId ${newPqKeyId} — refusing to publish`,
             );
           }
           pqSpkKeyId = newPqKeyId;
-          pqSpkSecret = pq.secretKey;
+          pqSpkStored = pq.stored;
         }
 
         // Both branches above guarantee a non-null PQSPK keyId + secret. Assert
@@ -691,20 +725,35 @@ export async function ensureDevicePreKeys(identity: Identity): Promise<DevicePre
           throw new Error('ensureDevicePreKeys: PQSPK keyId unexpectedly null after ensure');
         }
 
-        return reconstructPreKeySetFromSecrets(
+        const set = reconstructPreKeySetFromSecrets(
           identity,
           spkKeyId,
-          decodeBase64(spkSecretB64),
+          spkSecretB64,
           opkSecretsB64,
           pqSpkKeyId,
-          pqSpkSecret,
+          pqSpkStored,
         );
+        // F-1b one-time migration: secrets stored raw before the vault come
+        // back as vault blobs — replace the raw copies (best-effort per row;
+        // an unmigrated row keeps working and migrates on a later call).
+        if (set.signedPreKey.secretStored !== spkSecretB64) {
+          try { await db.saveSpkSecret(spkKeyId, set.signedPreKey.secretStored); } catch {/* retried next time */}
+        }
+        if (set.pqSignedPreKey.secretStored !== pqSpkStored) {
+          try { await db.savePqSpkSecret(pqSpkKeyId, set.pqSignedPreKey.secretStored); } catch {/* retried next time */}
+        }
+        for (const [keyId, stored] of set.opkSecrets) {
+          if (stored !== opkSecretsB64.get(keyId)) {
+            try { await db.saveOpkSecret(keyId, stored); } catch {/* retried next time */}
+          }
+        }
+        return set;
       }
     }
 
     // 2. No durable set yet — generate one, persist it (with readback), return it.
     const set = generatePreKeys(identity, 1, 100, 1, 1);
-    const spkSecretB64 = encodeBase64(set.signedPreKey.secretKey);
+    const spkSecretB64 = set.signedPreKey.secretStored;
 
     let persisted = false;
     let spkLastErr: unknown = null;
@@ -730,7 +779,7 @@ export async function ensureDevicePreKeys(identity: Identity): Promise<DevicePre
     // invariant. PQXDH is the default for fresh installs, so a PQSPK we can't
     // recover would silently break every inbound v2 handshake.
     const pqOk = await persistPqSpkWithReadback(
-      db, set.pqSignedPreKey.keyId, set.pqSignedPreKey.secretKey,
+      db, set.pqSignedPreKey.keyId, set.pqSignedPreKey.secretStored,
     );
     if (!pqOk) {
       throw new Error(
@@ -741,8 +790,8 @@ export async function ensureDevicePreKeys(identity: Identity): Promise<DevicePre
     try { await db.setSpkKeyId(set.signedPreKey.keyId); } catch {/* best-effort */}
     // Start the SPK age clock for the age-based rotation trigger (B-3).
     try { await db.setSpkCreatedAt(Date.now()); } catch {/* best-effort */}
-    for (const [keyId, secret] of set.opkSecrets.entries()) {
-      try { await db.saveOpkSecret(keyId, encodeBase64(secret)); } catch {/* best-effort */}
+    for (const [keyId, stored] of set.opkSecrets.entries()) {
+      try { await db.saveOpkSecret(keyId, stored); } catch {/* best-effort */}
     }
     return set;
   })();

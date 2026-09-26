@@ -26,6 +26,7 @@ import {
   type RatchetState,
 } from '../../crypto/signal/ratchet';
 import { serializeRatchetState, reviveRatchetState } from '../ratchetSerde';
+import { pk, pkOrNull } from '../../crypto/__tests__/helpers/rawIdentity';
 
 /** Persist + reload — the exact save/load cycle the socket client performs. */
 function roundTrip(state: RatchetState): RatchetState {
@@ -57,13 +58,13 @@ function newHybridPair(): { aliceState: RatchetState; bobState: RatchetState } {
   expect(x.version).toBe(2);
   const bobRoot = performX3DHReceiver(
     bob.identity,
-    bobPreKeys.signedPreKey.secretKey,
+    pk(bobPreKeys.signedPreKey.secretStored),
     null,
     alice.identity.publicKey,
     decodeBase64(x.myEphemeralPublicKeyB64),
     {
       cipherText: decodeBase64(x.pqCiphertextB64!),
-      pqSpkSecret: bobPreKeys.pqSignedPreKey.secretKey,
+      pqSpkSecret: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768'),
     },
   );
 
@@ -74,8 +75,8 @@ function newHybridPair(): { aliceState: RatchetState; bobState: RatchetState } {
     bobRoot,
     new Uint8Array(),
     false,
-    { publicKey: bobSpkPub, secretKey: bobPreKeys.signedPreKey.secretKey },
-    { publicKey: bobPqPub, secretKey: bobPreKeys.pqSignedPreKey.secretKey },
+    { publicKey: bobSpkPub, secretKey: pk(bobPreKeys.signedPreKey.secretStored) },
+    { publicKey: bobPqPub, secretKey: pk(bobPreKeys.pqSignedPreKey.secretStored, 'mlkem768') },
     null,
   );
   return { aliceState, bobState };
@@ -103,8 +104,10 @@ describe('serializeRatchetState — hybrid PQ material survives persistence', ()
       const a = ratchetEncrypt(aliceState, decodeUTF8(`a${i}`));
       aliceState = roundTrip(aliceState);
 
-      // Bob (also persisted+reloaded) decrypts Alice's chain turn.
-      bobState = roundTrip(bobState);
+      // Bob (also persisted+reloaded) decrypts Alice's chain turn. Not before
+      // his FIRST decrypt: until then his state holds his SPK/PQSPK as vault
+      // handles (F-1b phase 2), which the app never persists (next test).
+      if (i > 0) bobState = roundTrip(bobState);
       const gotA = ratchetDecrypt(bobState, a.header, a.ciphertext, a.nonce);
       expect(gotA).not.toBeNull();
       expect(encodeUTF8(gotA!)).toBe(`a${i}`);
@@ -123,6 +126,15 @@ describe('serializeRatchetState — hybrid PQ material survives persistence', ()
       expect(encodeUTF8(gotB!)).toBe(`b${i}`);
       aliceState = roundTrip(aliceState);
     }
+  });
+
+  it('refuses to persist a receiver state that still holds its SPK/PQSPK handles (F-1b)', () => {
+    const { aliceState, bobState } = newHybridPair();
+    expect(() => serializeRatchetState(bobState)).toThrow(/vault handle/);
+    // After the first decrypt the handles are gone (fresh ratchet keys): it persists.
+    const a0 = ratchetEncrypt(aliceState, decodeUTF8('hi'));
+    expect(ratchetDecrypt(bobState, a0.header, a0.ciphertext, a0.nonce)).not.toBeNull();
+    expect(() => serializeRatchetState(bobState)).not.toThrow();
   });
 
   it('a reloaded hybrid session still attaches PQ material on its next chain turn', () => {
