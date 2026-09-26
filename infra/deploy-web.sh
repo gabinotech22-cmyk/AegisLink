@@ -80,6 +80,7 @@ server {
                 aegislink.shop www.aegislink.shop;
 
     access_log off;
+    error_log /var/log/nginx/aegislink-web-error.log crit;
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;

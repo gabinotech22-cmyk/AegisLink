@@ -152,7 +152,7 @@ server {
 
     # Privacy: do NOT log client IPs or access patterns
     access_log off;
-    error_log /var/log/nginx/aegislink-error.log warn;
+    error_log /var/log/nginx/aegislink-error.log crit;
 
     # Security headers
     add_header Strict-Transport-Security "max-age=63072000" always;
