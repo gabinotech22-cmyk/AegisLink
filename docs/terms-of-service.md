@@ -1,7 +1,7 @@
 # AegisLink Terms of Service
 
 **Effective date:** 2026-05-21
-**Last updated:** 2026-07-17
+**Last updated:** 2026-09-26
 
 Please read these Terms of Service ("Terms") carefully before using AegisLink. By installing or using the application, you agree to be bound by them.
 
@@ -16,7 +16,6 @@ AegisLink is an end-to-end encrypted messaging application. It provides:
 - Encrypted voice and video calls over WebRTC (DTLS-SRTP)
 - Ephemeral messages with user-configurable deletion timers
 - Encrypted file attachments
-- An optional enterprise tier ("AegisLink Work") with organizational features
 
 AegisLink operates a relay server that forwards encrypted messages between clients. The relay never has access to plaintext message content. The relay is a transport layer, not a data processor.
 
@@ -85,16 +84,13 @@ Nothing in these Terms limits liability that cannot be excluded under mandatory 
 
 ---
 
-## 9. AegisLink Work — Enterprise Terms
+## 9. Price and Donations
 
-AegisLink Work is an optional enterprise tier that provides organizational features including managed workspace administration, role-based access controls, and audit tools for compliance purposes.
+AegisLink is free. There are no subscriptions, in-app purchases, paid accounts or paid features.
 
-**Additional terms for AegisLink Work:**
+You can support the project with a voluntary donation on the external page https://aegis-link.it/donate.html (Monero or Bitcoin Lightning). A donation is a gift: it does not buy any feature, service level or right, and it is not linked to your AegisID. Because we collect no information that identifies donors, we cannot identify or refund a specific donation.
 
-- Enterprise subscriptions are governed by a separate Order Form and Enterprise Agreement. In the event of conflict, the Enterprise Agreement prevails.
-- AegisLink Work administrators of an organization can manage membership and access within that organization's workspace. They cannot decrypt message content; the E2EE architecture is unchanged.
-- Subscriptions are billed in accordance with the applicable Order Form. Refunds are subject to the terms in the Order Form.
-- AegisLink Work does not alter the data practices described in the Privacy Policy. No message content becomes accessible to AegisLink as a result of using Work features.
+If paid features are ever offered, they will come with their own terms, published before they become available.
 
 ---
 
@@ -118,9 +114,9 @@ We reserve the right to suspend relay access for accounts that violate §4 (Acce
 
 ## 13. Governing Law and Dispute Resolution
 
-*[Governing law placeholder — to be updated before public launch with the jurisdiction in which the AegisLink project is legally established.]*
+These Terms are governed by the laws of Italy, where AegisLink is operated. If you use AegisLink as a consumer, you also keep the protection of the mandatory consumer-protection rules of the country where you habitually reside, and you may bring proceedings in the courts of that country; nothing in these Terms takes those rights away.
 
-Any dispute arising out of or relating to these Terms shall be resolved by binding arbitration in accordance with the rules of [arbitration body], except that either party may seek injunctive relief in a court of competent jurisdiction for intellectual property or security matters.
+Before going to court, please contact us (see §15) so we can try to resolve the issue informally.
 
 Nothing in this clause prevents you from lodging a complaint with a supervisory authority if you are located in the European Economic Area or a jurisdiction with equivalent data protection rights.
 
@@ -128,7 +124,7 @@ Nothing in this clause prevents you from lodging a complaint with a supervisory 
 
 ## 14. Miscellaneous
 
-- **Entire agreement:** These Terms, together with the Privacy Policy and any applicable Order Form, constitute the entire agreement between you and AegisLink regarding the service.
+- **Entire agreement:** These Terms, together with the Privacy Policy, constitute the entire agreement between you and AegisLink regarding the service.
 - **Severability:** If any provision is found unenforceable, the remaining provisions remain in full force.
 - **No waiver:** Failure to enforce any provision is not a waiver of our right to enforce it in the future.
 - **Assignment:** You may not assign your rights under these Terms. We may assign ours in connection with a merger or acquisition, provided that your privacy rights under the Privacy Policy are not diminished.
@@ -141,7 +137,3 @@ Legal notices and Terms-related questions:
 
 - Email: aegislink.report@gmail.com
 - GitHub: https://github.com/gabinotech22-cmyk/AegisLink
-
----
-
-*Una versión en español de estos términos está disponible bajo petición. Envíe un correo a aegislink.report@gmail.com con el asunto "Terms of Service — Español".*
