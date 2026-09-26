@@ -1,6 +1,6 @@
 # Fase 4 · Slice 2b — Push wake-up por mailbox (documento de decisión)
 
-> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. **Estado actual:** 2b.0–2b.4 desplegados (ntfy sobre onion co-hospedado con el relay; token wake iOS tras flag); 2b.3c (UnifiedPush) sigue en backlog. Desde F4 el wake tiene clase (`wakeHint: 'call'` → prioridad urgente, `server/src/push/ntfy.ts`) y desde F6 el mismo ntfy forma parte del paquete de relay propio (`infra/selfhost/`, `docs/SELF-HOSTING.md`). Estado canónico: `docs/SEALED-SENDER-ARCHITECTURE.md` §5 y `docs/ROADMAP.md`.
+> **Nota de vigencia (2026-09-19, regla de oro doc #8):** doc **histórico** — refleja el estado en que se escribió; no se reescribe. **Estado actual:** 2b.0–2b.4 desplegados (ntfy sobre onion co-hospedado con el relay; token wake iOS tras flag); 2b.3c (conector UnifiedPush en Android) implementado el 2026-09-26, pendiente de validar en dispositivo. Desde F4 el wake tiene clase (`wakeHint: 'call'` → prioridad urgente, `server/src/push/ntfy.ts`) y desde F6 el mismo ntfy forma parte del paquete de relay propio (`infra/selfhost/`, `docs/SELF-HOSTING.md`). Estado canónico: `docs/SEALED-SENDER-ARCHITECTURE.md` §5 y `docs/ROADMAP.md`.
 
 > **Actualización 2026-09-24:** el binding de 2b.4 ya no usa token Expo:
 > - el cliente registra su token **APNs crudo** (`mailbox:push:token` con `apnsToken`);
@@ -250,10 +250,18 @@ Google/Apple; el topic rota por época como todo lo demás.
   localhost / single-label / .local/.internal/.onion / credenciales, cap 512).
   Purga de bindings >48 h (2 épocas) en el scheduler (R1: nada estable
   sobrevive la rotación). Tests: `upEndpointBinding.relay.test.ts`.
-- **2b.3c (mobile: conector UnifiedPush)** — PENDIENTE. Receiver Android vía
-  config-plugin, registro con el distribuidor instalado (ntfy app / Sunup),
-  emitir `mailbox:push:endpoint` al conectar/rotar época, y fallback FCM
-  opt-in tras flag (§7). Trabajo nativo → requiere prebuild + APK.
+- **2b.3c (mobile: conector UnifiedPush)** — ✅ HECHO en código (2026-09-26;
+  validación en dispositivo pendiente). `mobile/plugins/withUnifiedPush.js`
+  (conector `org.unifiedpush.android:connector` 3.3.5, sin Play Services; su
+  `PushService` sin exportar; un wake arranca la tarea headless
+  `AegisMailboxWake`, que reconecta y drena por Tor) y
+  `src/notifications/unifiedPush.ts`. Opt-in en Privacidad eligiendo la
+  distribuidora. **Un registro UnifiedPush por buzón** (no por app): el endpoint
+  rota con la época y no se comparte entre perfiles, así que el relay no puede
+  enlazar épocas por el endpoint (R1). El cambio de perfil retira el binding;
+  el pánico desregistra y olvida la distribuidora. Sin fallback FCM (no hay
+  FCM en ninguna variante Android). Tests: `unifiedPush.test.ts`,
+  `plugins/__tests__/withUnifiedPush.test.ts`.
 - **2b.4 (iOS app matada, tras flag)** — 🟢 IMPLEMENTADO (rama
   `feat/mailbox-ios-apns-wake`; validación en iPhone pendiente). Binding
   `mailbox(época) → token Expo/APNs` con **doble opt-in**: flag cliente

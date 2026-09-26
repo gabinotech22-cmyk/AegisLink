@@ -125,6 +125,7 @@
       "./app.plugin.js",
       "./plugins/withCallForegroundService.js",
       "./plugins/withCallWakeService.js",
+      "./plugins/withUnifiedPush.js",
       "./plugins/withTorEmbedded.js",
       "./plugins/withTorEmbeddedIOS.js",
       "./plugins/withIosVoip.js",

@@ -12,6 +12,8 @@ import { TopBar } from '../components/TopBar';
 import { Section, Row, Toggle } from '../components/Section';
 import { useContacts } from '../store/contacts';
 import { DeleteAccountSection } from '../components/DeleteAccountSection';
+import { UnifiedPushToggle } from '../components/UnifiedPushToggle';
+import { isUnifiedPushAvailable } from '../notifications/unifiedPush';
 import { TabBar, type Tab } from '../components/TabBar';
 import { useIdentity } from '../store/identity';
 import { usePreferences } from '../store/preferences';
@@ -251,9 +253,10 @@ export function PrivacyScreen({ onTab, onNav, onCreateProfile }: Props) {
                 if (v) startCallWakeService();
                 else stopCallWakeService();
               }}
-              noBorder
+              noBorder={!isUnifiedPushAvailable()}
             />
           )}
+          {Platform.OS === 'android' && <UnifiedPushToggle t={t} noBorder />}
         </Section>
 
         <Section t={t} label={i18nT('privacy.alertsSection')}>
