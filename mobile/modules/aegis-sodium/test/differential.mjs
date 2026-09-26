@@ -3,7 +3,8 @@
  * Differential test of the aegis_sodium C core compiled with the vendored
  * libsodium (F-1 B2) against the JavaScript implementations the app used
  * before (TweetNaCl, @noble/hashes): identical bytes on random inputs and on
- * RFC vectors (Argon2id also at the app's exact PIN and backup parameters), plus the C core's own contract (length validation, NULL
+ * RFC vectors (Argon2id also at the app's exact PIN and backup parameters;
+ * ML-KEM-768 against @noble/post-quantum), plus the C core's own contract (length validation, NULL
  * handling, fail-closed on low-order points, rejected small-order signatures).
  *
  *   cmake -S modules/aegis-sodium/test -B build/aegis-sodium-host -G Ninja
@@ -19,10 +20,12 @@ import { randomBytes } from 'node:crypto';
 
 const require = createRequire(import.meta.url);
 const nacl = require('tweetnacl');
-const { hmac } = require('@noble/hashes/hmac');
-const { hkdf } = require('@noble/hashes/hkdf');
-const { sha256 } = require('@noble/hashes/sha2');
-const { argon2id } = require('@noble/hashes/argon2');
+const { hmac } = require('@noble/hashes/hmac.js');
+const { hkdf } = require('@noble/hashes/hkdf.js');
+const { sha256 } = require('@noble/hashes/sha2.js');
+const { argon2id } = require('@noble/hashes/argon2.js');
+const { pbkdf2 } = require('@noble/hashes/pbkdf2.js');
+const { ml_kem768 } = await import('@noble/post-quantum/ml-kem.js');
 
 const OK = 0;
 const EVERIFY = 1;
@@ -155,6 +158,84 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
     expectBytes(argon2id(new Uint8Array(0), enc.encode('somesalt'), { t: 1, m: 64, p: 1, dkLen: 32 })));
 }
 
+// PBKDF2-HMAC-SHA256 against @noble (which wrote the legacy v1/v2 backups) and
+// RFC 7914 §11; including the app's own parameters (v1: 100k, 32-byte key).
+{
+  const enc = new TextEncoder();
+  const p2 = (outLen, pwd, salt, c) =>
+    call('pbkdf2_sha256', [`#${outLen}`, pwd, salt, le32(c)], expectBytes(pbkdf2(sha256, pwd, salt, { c, dkLen: outLen })));
+  for (let i = 0; i < Math.min(ITER, 40); i++) p2(1 + randInt(63), rand(randInt(100)), rand(randInt(64)), 1 + randInt(2000));
+  p2(32, rand(200), rand(32), 3); // password longer than the HMAC block (hashed first)
+  p2(32, enc.encode('correct horse battery staple'), rand(32), 100_000); // backup v1
+  call('pbkdf2_sha256', ['#64', enc.encode('passwd'), enc.encode('salt'), le32(1)],
+    expectBytes(unhex('55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783')));
+  call('pbkdf2_sha256', ['#32', 'NULL', 'NULL', le32(2)], expectBytes(pbkdf2(sha256, new Uint8Array(0), new Uint8Array(0), { c: 2, dkLen: 32 })));
+}
+
+// Registration proof-of-work: the C miner returns the SAME nonce as the
+// JavaScript miner it replaced (first 8-hex-digit counter, in order), and the
+// relay's check (server/src/pow/challenge.ts: SHA-256 of the string
+// nonce + challenge) accepts it.
+{
+  const enc = new TextEncoder();
+  const zeroBits = (d, bits) => {
+    for (let i = 0; i < Math.floor(bits / 8); i++) if (d[i] !== 0) return false;
+    return bits % 8 === 0 || (d[Math.floor(bits / 8)] & (0xff << (8 - (bits % 8)))) === 0;
+  };
+  const jsMiner = (challenge, difficulty) => {
+    for (let c = 0; ; c++) {
+      const nonce = c.toString(16).padStart(8, '0');
+      if (zeroBits(sha256(enc.encode(nonce + challenge)), difficulty)) return nonce;
+    }
+  };
+  const pow = (challenge, difficulty) =>
+    call('pow_sha256', ['#8', enc.encode(challenge), le32(difficulty)], expectBytes(enc.encode(jsMiner(challenge, difficulty))));
+  for (let i = 0; i < Math.min(ITER, 40); i++) pow(Buffer.from(rand(32)).toString('hex'), randInt(14));
+  pow(Buffer.from(rand(32)).toString('hex'), 18); // the relay's production registration difficulty
+  pow('ñ-desafío-😀', 10); // non-ASCII challenge: hashed as UTF-8, like the relay
+  pow('x'.repeat(512), 4); // longest accepted challenge
+}
+
+// ML-KEM-768 against @noble/post-quantum, which wrote every PQ prekey and
+// ratchet key stored today: same seed -> same key pair (and the same 2400-byte
+// secret key), and each side decapsulates what the other encapsulated, including
+// the implicit-rejection secret of a tampered ciphertext.
+{
+  for (let i = 0; i < Math.min(ITER, 60); i++) {
+    const seed = rand(64);
+    const k = ml_kem768.keygen(seed);
+    call('mlkem768_seed_keypair', ['#1184', '#2400', seed], expectBytes(k.publicKey, k.secretKey));
+    const e = ml_kem768.encapsulate(k.publicKey);
+    call('mlkem768_dec', ['#32', e.cipherText, k.secretKey], expectBytes(e.sharedSecret));
+    const bad = e.cipherText.slice();
+    bad[randInt(bad.length - 1)] ^= 1 << randInt(7);
+    call('mlkem768_dec', ['#32', bad, k.secretKey], expectBytes(ml_kem768.decapsulate(bad, k.secretKey)));
+    // C encapsulates, @noble decapsulates to the same secret.
+    call('mlkem768_enc', ['#1088', '#32', k.publicKey], (rc, [ct, ss]) =>
+      rc === OK && eq(ml_kem768.decapsulate(ct, k.secretKey), ss) ? null : 'noble cannot decapsulate the C ciphertext');
+  }
+  // A key pair made the way the app made them (keygen() with no seed): C decapsulates.
+  const k = ml_kem768.keygen();
+  const e = ml_kem768.encapsulate(k.publicKey);
+  call('mlkem768_dec', ['#32', e.cipherText, k.secretKey], expectBytes(e.sharedSecret));
+  // Fresh C key pairs are consistent: @noble encapsulates to the pk, C decapsulates.
+  call('mlkem768_keypair', ['#1184', '#2400'], (rc, [pk, sk]) => {
+    if (rc !== OK) return `rc ${rc}`;
+    if (!eq(ml_kem768.getPublicKey(sk), pk)) return 'pk is not the one embedded in sk';
+    return null;
+  });
+  // FIPS 203 encapsulation-key check: a non-canonical coefficient (0xfff > q) fails closed.
+  const nonCanonical = k.publicKey.slice();
+  nonCanonical[0] = 0xff;
+  nonCanonical[1] |= 0x0f;
+  call('mlkem768_enc', ['#1088', '#32', nonCanonical], expectRc(EFAIL));
+  // FIPS 203 decapsulation-key check: a secret key whose embedded H(ek) is wrong fails closed.
+  const corrupt = k.secretKey.slice();
+  corrupt[1152 + 1184] ^= 1;
+  call('mlkem768_dec', ['#32', e.cipherText, corrupt], expectRc(EFAIL));
+  call('mlkem768_dec', ['#32', e.cipherText, new Uint8Array(2400)], expectRc(EFAIL));
+}
+
 // Empty messages, with the NULL a binding passes for an empty JS array.
 {
   const nonce = rand(24);
@@ -222,6 +303,31 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
     ['argon2id', ['#32', 'aa', rand(16), le32(1), le32(7)]],
     ['argon2id', ['#32', 'aa', rand(16), le32(1), le32(262145)]],
     ['argon2id', ['#32', 'aa', rand(16), 'aabb', le32(64)]],
+    ['pow_sha256', ['#7', 'aa', le32(1)]],
+    ['pow_sha256', ['#9', 'aa', le32(1)]],
+    ['pow_sha256', ['NULL:8', 'aa', le32(1)]],
+    ['pow_sha256', ['#8', 'NULL', le32(1)]],
+    ['pow_sha256', ['#8', 'NULL:4', le32(1)]],
+    ['pow_sha256', ['#8', rand(513), le32(1)]],
+    ['pow_sha256', ['#8', 'aa', le32(33)]],
+    ['pbkdf2_sha256', ['#0', 'aa', 'bb', le32(1)]],
+    ['pbkdf2_sha256', ['#65', 'aa', 'bb', le32(1)]],
+    ['pbkdf2_sha256', ['#32', 'aa', 'bb', le32(0)]],
+    ['pbkdf2_sha256', ['#32', 'aa', 'bb', le32(10_000_001)]],
+    ['pbkdf2_sha256', ['#32', 'NULL:4', 'bb', le32(1)]],
+    ['pbkdf2_sha256', ['#32', 'aa', rand(1025), le32(1)]],
+    ['mlkem768_keypair', ['#1183', '#2400']],
+    ['mlkem768_keypair', ['#1184', '#2399']],
+    ['mlkem768_seed_keypair', ['#1184', '#2400', rand(63)]],
+    ['mlkem768_seed_keypair', ['#1184', '#2400', 'NULL:64']],
+    ['mlkem768_enc', ['#1087', '#32', rand(1184)]],
+    ['mlkem768_enc', ['#1088', '#31', rand(1184)]],
+    ['mlkem768_enc', ['#1088', '#32', rand(1183)]],
+    ['mlkem768_enc', ['#1088', '#32', 'NULL:1184']],
+    ['mlkem768_dec', ['#31', rand(1088), rand(2400)]],
+    ['mlkem768_dec', ['#32', rand(1087), rand(2400)]],
+    ['mlkem768_dec', ['#32', rand(1088), rand(2399)]],
+    ['mlkem768_dec', ['#32', 'NULL:1088', rand(2400)]],
   ];
   for (const [op, args] of bad) call(op, args, expectRc(EBADLEN));
   call('memcmp', ['NULL', 'NULL'], expectRc(EVERIFY));

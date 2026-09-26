@@ -5,7 +5,8 @@
  *   <arg> is lowercase hex bytes, "_" (empty buffer), "NULL" (NULL pointer,
  *   length 0), "NULL:<n>" (NULL pointer claiming <n> bytes) or "#<n>" (an
  *   output buffer of <n> bytes). argon2id's t and m are 4-byte little-endian
- *   buffers.
+ *   buffers, and so are pow_sha256's difficulty and
+ *   pbkdf2_sha256's iteration count.
  * Output, one line per call:  <return code> <hex of each output buffer>...
  */
 #define _POSIX_C_SOURCE 200809L /* strtok_r */
@@ -84,6 +85,12 @@ static int dispatch(const char *op, arg_t *args, int n) {
   OP("hmacsha256", 3, aegis_hmacsha256(A(0), A(1), A(2)))
   OP("hkdf_sha256", 4, aegis_hkdf_sha256(A(0), A(1), A(2), A(3)))
   OP("argon2id", 5, aegis_argon2id(A(0), A(1), A(2), u32(&args[3]), u32(&args[4])))
+  OP("pow_sha256", 3, aegis_pow_sha256(A(0), A(1), u32(&args[2])))
+  OP("pbkdf2_sha256", 4, aegis_pbkdf2_sha256(A(0), A(1), A(2), u32(&args[3])))
+  OP("mlkem768_keypair", 2, aegis_mlkem768_keypair(A(0), A(1)))
+  OP("mlkem768_seed_keypair", 3, aegis_mlkem768_seed_keypair(A(0), A(1), A(2)))
+  OP("mlkem768_enc", 3, aegis_mlkem768_enc(A(0), A(1), A(2)))
+  OP("mlkem768_dec", 3, aegis_mlkem768_dec(A(0), A(1), A(2)))
 #undef OP
   return -101;
 }

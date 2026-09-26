@@ -34,7 +34,7 @@ jest.mock('expo-crypto', () => {
 // 120 s was enough locally but timed out the a2-upgrade test in CI.
 jest.setTimeout(600_000);
 
-import { argon2id } from '@noble/hashes/argon2';
+import { argon2id } from '@noble/hashes/argon2.js';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { createHash } from 'node:crypto';
 import {

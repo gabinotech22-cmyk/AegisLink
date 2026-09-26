@@ -14,8 +14,8 @@
 
 import nacl from 'tweetnacl';
 import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
-import { pbkdf2 } from '@noble/hashes/pbkdf2';
-import { sha256 } from '@noble/hashes/sha256';
+import { pbkdf2 } from '@noble/hashes/pbkdf2.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 
 // Argon2id m=64 MiB, t=3 is intentionally slow (H-3 mitigation), and the
 // pure-JS compute runs ~15-20× slower under jest than plain Node — a single

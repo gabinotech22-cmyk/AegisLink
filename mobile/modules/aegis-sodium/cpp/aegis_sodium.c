@@ -10,6 +10,7 @@
 #include "aegis_sodium.h"
 
 #include <sodium.h>
+#include <string.h>
 
 /* libsodium's internal Argon2 API (not part of <sodium.h>), compiled from the same vendored sources. */
 #include "../vendor/libsodium/src/libsodium/crypto_pwhash/argon2/argon2.h"
@@ -193,5 +194,127 @@ int aegis_argon2id(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdle
     sodium_memzero(out, outlen);
     return AEGIS_EFAIL;
   }
+  return AEGIS_OK;
+}
+
+static int has_leading_zero_bits(const uint8_t *d, uint32_t bits) {
+  uint32_t full = bits / 8, rem = bits % 8, i;
+  for (i = 0; i < full; i++)
+    if (d[i] != 0) return 0;
+  return rem == 0 || (d[full] & (uint8_t) (0xFF << (8 - rem))) == 0;
+}
+
+int aegis_pow_sha256(uint8_t *nonce, size_t noncelen, const uint8_t *challenge, size_t challen, uint32_t difficulty) {
+  static const char hexdigits[] = "0123456789abcdef";
+  uint8_t buf[AEGIS_POW_NONCE_LEN + AEGIS_POW_CHALLENGE_MAX];
+  uint8_t digest[crypto_hash_sha256_BYTES];
+  uint64_t i;
+  if (noncelen != AEGIS_POW_NONCE_LEN || nonce == NULL) return AEGIS_EBADLEN;
+  if (challen == 0 || challen > AEGIS_POW_CHALLENGE_MAX || challenge == NULL) return AEGIS_EBADLEN;
+  if (difficulty > AEGIS_POW_DIFFICULTY_MAX) return AEGIS_EBADLEN;
+  memcpy(buf + AEGIS_POW_NONCE_LEN, challenge, challen);
+  for (i = 0; i <= 0xFFFFFFFFu; i++) {
+    uint32_t v = (uint32_t) i;
+    int k;
+    for (k = AEGIS_POW_NONCE_LEN - 1; k >= 0; k--) {
+      buf[k] = (uint8_t) hexdigits[v & 0xF];
+      v >>= 4;
+    }
+    crypto_hash_sha256(digest, buf, AEGIS_POW_NONCE_LEN + challen);
+    if (has_leading_zero_bits(digest, difficulty)) {
+      memcpy(nonce, buf, AEGIS_POW_NONCE_LEN);
+      return AEGIS_OK;
+    }
+  }
+  return AEGIS_EFAIL;
+}
+
+/* dk = dk_PKE (384 * k bytes, k = 3) || ek || H(ek) || z  (FIPS 203 Algorithm 16). */
+#define MLKEM768_DK_PKE 1152
+
+int aegis_mlkem768_keypair(uint8_t *pk, size_t pklen, uint8_t *sk, size_t sklen) {
+  if (pklen != AEGIS_MLKEM768_PK || sklen != AEGIS_MLKEM768_SK || pk == NULL || sk == NULL) return AEGIS_EBADLEN;
+  return crypto_kem_mlkem768_keypair(pk, sk) == 0 ? AEGIS_OK : AEGIS_EFAIL;
+}
+
+int aegis_mlkem768_seed_keypair(uint8_t *pk, size_t pklen, uint8_t *sk, size_t sklen, const uint8_t *seed,
+                                size_t seedlen) {
+  if (pklen != AEGIS_MLKEM768_PK || sklen != AEGIS_MLKEM768_SK || pk == NULL || sk == NULL) return AEGIS_EBADLEN;
+  if (seedlen != AEGIS_MLKEM768_SEED || seed == NULL) return AEGIS_EBADLEN;
+  return crypto_kem_mlkem768_seed_keypair(pk, sk, seed) == 0 ? AEGIS_OK : AEGIS_EFAIL;
+}
+
+int aegis_mlkem768_enc(uint8_t *ct, size_t ctlen, uint8_t *ss, size_t sslen, const uint8_t *pk, size_t pklen) {
+  if (ctlen != AEGIS_MLKEM768_CT || sslen != AEGIS_MLKEM768_SS || ct == NULL || ss == NULL) return AEGIS_EBADLEN;
+  if (pklen != AEGIS_MLKEM768_PK || pk == NULL) return AEGIS_EBADLEN;
+  if (crypto_kem_mlkem768_enc(ct, ss, pk) != 0) {
+    sodium_memzero(ss, sslen);
+    return AEGIS_EFAIL;
+  }
+  return AEGIS_OK;
+}
+
+int aegis_mlkem768_dec(uint8_t *ss, size_t sslen, const uint8_t *ct, size_t ctlen, const uint8_t *sk, size_t sklen) {
+  if (sslen != AEGIS_MLKEM768_SS || ss == NULL) return AEGIS_EBADLEN;
+  if (ctlen != AEGIS_MLKEM768_CT || ct == NULL || sklen != AEGIS_MLKEM768_SK || sk == NULL) return AEGIS_EBADLEN;
+  /* FIPS 203 decapsulation-key check (as @noble does): the dk embeds ek and
+   * H(ek) = SHA3-256(ek); a corrupted key fails here instead of yielding a
+   * wrong secret. The hash of a public key needs no constant time, but
+   * sodium_memcmp costs nothing. */
+  {
+    uint8_t h[32];
+    const uint8_t *ek = sk + MLKEM768_DK_PKE;
+    if (crypto_hash_sha3256(h, ek, AEGIS_MLKEM768_PK) != 0 || sodium_memcmp(h, ek + AEGIS_MLKEM768_PK, sizeof h) != 0) {
+      sodium_memzero(ss, sslen);
+      return AEGIS_EFAIL;
+    }
+  }
+  if (crypto_kem_mlkem768_dec(ss, ct, sk) != 0) {
+    sodium_memzero(ss, sslen);
+    return AEGIS_EFAIL;
+  }
+  return AEGIS_OK;
+}
+
+int aegis_pbkdf2_sha256(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdlen, const uint8_t *salt,
+                        size_t saltlen, uint32_t iterations) {
+  static const uint8_t empty = 0;
+  crypto_auth_hmacsha256_state keyed, st;
+  uint8_t u[crypto_auth_hmacsha256_BYTES], t[crypto_auth_hmacsha256_BYTES], be[4];
+  size_t done = 0;
+  uint32_t block = 1, j;
+  size_t k;
+  if (outlen == 0 || outlen > AEGIS_PBKDF2_OUT_MAX || out == NULL) return AEGIS_EBADLEN;
+  if (pwdlen > AEGIS_PBKDF2_PWD_MAX || saltlen > AEGIS_PBKDF2_SALT_MAX) return AEGIS_EBADLEN;
+  NEED(pwd, pwdlen);
+  NEED(salt, saltlen);
+  if (iterations < 1 || iterations > AEGIS_PBKDF2_ITER_MAX) return AEGIS_EBADLEN;
+  /* HMAC keyed once with the password; each PRF call starts from a copy. */
+  crypto_auth_hmacsha256_init(&keyed, pwdlen ? pwd : &empty, pwdlen);
+  while (done < outlen) {
+    be[0] = (uint8_t) (block >> 24);
+    be[1] = (uint8_t) (block >> 16);
+    be[2] = (uint8_t) (block >> 8);
+    be[3] = (uint8_t) block;
+    st = keyed; /* U1 = PRF(P, S || INT(i)) */
+    crypto_auth_hmacsha256_update(&st, saltlen ? salt : &empty, saltlen);
+    crypto_auth_hmacsha256_update(&st, be, sizeof be);
+    crypto_auth_hmacsha256_final(&st, u);
+    memcpy(t, u, sizeof t);
+    for (j = 1; j < iterations; j++) { /* Uj = PRF(P, Uj-1); T ^= Uj */
+      st = keyed;
+      crypto_auth_hmacsha256_update(&st, u, sizeof u);
+      crypto_auth_hmacsha256_final(&st, u);
+      for (k = 0; k < sizeof t; k++) t[k] ^= u[k];
+    }
+    k = outlen - done < sizeof t ? outlen - done : sizeof t;
+    memcpy(out + done, t, k);
+    done += k;
+    block++;
+  }
+  sodium_memzero(&keyed, sizeof keyed);
+  sodium_memzero(&st, sizeof st);
+  sodium_memzero(u, sizeof u);
+  sodium_memzero(t, sizeof t);
   return AEGIS_OK;
 }

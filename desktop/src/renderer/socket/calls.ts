@@ -476,7 +476,7 @@ export async function startCall(toAegisId: string, media: CallMedia): Promise<vo
       onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
       onIceCandidate: (candidate) => {
         if (!emitCallSignal(socket, 'ice', callId, toAegisId, JSON.stringify(candidate.toJSON()))) {
-          if (DEV) console.warn('[calls] cannot seal outgoing ICE — callKey missing');
+          if (DEV) logger.warn('[calls] cannot seal outgoing ICE — callKey missing');
         }
       },
       onConnectionStateChange: (state) => {
@@ -534,7 +534,7 @@ export async function acceptCall(): Promise<void> {
       onRemoteStream: (s) => useCall.getState().setStreams(useCall.getState().localStream, s),
       onIceCandidate: (candidate) => {
         if (!emitCallSignal(socket, 'ice', callId, peerId, JSON.stringify(candidate.toJSON()))) {
-          if (DEV) console.warn('[calls] cannot seal outgoing ICE — callKey missing');
+          if (DEV) logger.warn('[calls] cannot seal outgoing ICE — callKey missing');
         }
       },
       onConnectionStateChange: (state) => {

@@ -134,8 +134,14 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 
 ## Hito 3 — Terminar el endurecimiento cripto 🟠
 
-- [ ] **H3 — unificar `@noble/hashes`** mobile v1 ↔ desktop v2 (hoy mitigado por KAT cross-platform;
-      falta unificar mayor + verificación Metro on-device).
+- [x] **H3 — unificar `@noble/hashes`** ✅ (2026-09-25): mobile pasa de 1.8 a 2.4.0, la misma versión
+      que desktop (imports con `.js`; `sha256` → `sha2.js`). El parche `nobleNextTickPatch` (que
+      hacía ceder el hilo al PBKDF2 de backups v1/v2) no funciona con el ESM de v2, así que ese
+      PBKDF2 pasa al núcleo C (`aegis_pbkdf2_sha256`, asíncrono, mismos bytes que @noble) y el
+      parche se borra. Pruebas: `noble-kat.test.ts` (mismos vectores en las dos plataformas),
+      `differential.mjs` (PBKDF2 C vs @noble y RFC 7914), `sodium-facade.test.ts`,
+      `backup.test.ts` (backups v1/v2/v3). La verificación Metro en dispositivo la hace el E2E de
+      Android del CI (compila el APK con Metro).
 - [x] **F-1 — núcleo cripto nativo** ✅ (en mobile, efectivo desde el primer build nativo que lo incluya): portar hot-path (X25519, XSalsa20-Poly1305, Ed25519, HKDF/HMAC)
       a libsodium, conservando la capa TS. Cierra el gap constant-time a través del JIT. Sustitución de
       implementación, **no** cambio de protocolo (bytes idénticos, sin forzar actualización; sí exige
@@ -176,6 +182,7 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
       en memoria nativa (módulo en mobile, proceso main en desktop) y JS recibe un handle, como
       libsignal. Un XSS en el renderer ya no podría leer claves. F-1 cierra el timing del JIT pero no
       saca las claves del heap de JS.
+      Incluye ML-KEM-768 nativo en desktop (ver abajo).
 - [x] **Argon2id nativo en mobile** ✅ (#549; efectivo desde el primer build nativo que lo incluya):
       PIN y backup v3 corren en libsodium nativo, fuera del hilo de JS. **Sin formato de backup
       nuevo**: el núcleo C llama a `argon2id_hash_raw` (acepta salts de 8–64 B), así que los backups
@@ -185,17 +192,54 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
       `modules/aegis-sodium/test/differential.mjs` (parámetros exactos del PIN y del backup + vector
       de referencia), `sodium-facade.test.ts`, `lock/__tests__/pin.test.ts`, flujo Maestro
       `.maestro/03-app-lock-pin.yaml` en emulador. Desktop sigue con @noble (V8 lo hace en <1 s).
-- [ ] **ML-KEM-768 nativo**: sigue en @noble. libsodium 1.0.22 (ya vendorizado) trae
-      `crypto_kem_mlkem768`; moverlo exige probar compatibilidad byte a byte con @noble/post-quantum
-      (claves de prekeys PQ ya publicadas) antes de cambiar.
-- [ ] Cerrar los "partial coverage" de la auditoría: zeroización en intermedios X3DH/PQXDH,
-      `assertNonZero` ML-KEM, barrido constant-time de comparaciones restantes.
+- [x] **Prueba de trabajo (PoW) nativa en mobile** ✅ (efectiva desde el primer build nativo que la
+      incluya): el minero del registro, de subidas de blobs y de envíos al mailbox corre en C
+      (`aegis_pow_sha256`, fuera del hilo de JS) en vez de ~260k SHA-256 en JS sobre Hermes. Mismo
+      orden de nonces que el minero JS, así que devuelve el mismo nonce y el relay no cambia. Cierra
+      el fix 1 del sospechoso "PoW vs TTL" de `ROADMAP-2026-07.md` §2. Pruebas:
+      `modules/aegis-sodium/test/differential.mjs` (núcleo C vs minero JS de referencia, incl.
+      dificultad 18 y challenge no ASCII), `crypto/__tests__/registration.solvePoW.test.ts`,
+      `sodium-facade.test.ts`. Desktop sigue en JS (V8 con JIT).
+- [x] **ML-KEM-768 nativo en mobile** ✅ (efectivo desde el primer build nativo que lo incluya):
+      PQXDH (prekeys PQ) y el ratchet PQ corren en `crypto_kem_mlkem768` de libsodium, tras la
+      fachada `ml_kem768` (misma API que @noble). **Sin migración**: byte a byte idéntico a
+      @noble/post-quantum (misma semilla → mismo par de claves y misma clave secreta expandida de
+      2400 B, descapsulación cruzada, mismo secreto de rechazo implícito), así que las prekeys PQ
+      ya publicadas y los estados de ratchet guardados siguen funcionando. `@noble/post-quantum`
+      pasa a devDependency (oráculo). Pruebas: `modules/aegis-sodium/test/differential.mjs`
+      (núcleo C vs @noble, incl. claves generadas como las generaba la app y rechazo de claves
+      inválidas), `sodium-facade.test.ts`, `f1-golden.test.ts` (sesión híbrida persistida con
+      @noble 0.6.1), `crypto-imports.test.ts` (nada de @noble/post-quantum en producción).
+- [ ] **ML-KEM-768 nativo en desktop**: sigue en @noble. `sodium-native` no trae ML-KEM, y el
+      BoringSSL de Electron 42 genera claves ML-KEM pero **no importa la clave pública de otro**
+      (no puede encapsular; probado en DER/SPKI, PEM, raw y JWK). Decisión del dueño (2026-09-25):
+      se resuelve dentro de F-1b, cuando las claves del desktop salgan del renderer.
+- [x] **"Partial coverage" de la auditoría 2026-06-30** ✅ (2026-09-25), verificado contra el código:
+      - Zeroización de intermedios X3DH/PQXDH y `assertNonZero` del secreto ML-KEM: ya estaban en
+        las dos plataformas (`x3dh.ts` y `ratchet.ts`, en `try/finally`). El único hueco era que
+        `ratchetEncrypt` de desktop no borraba la clave de mensaje si el sellado lanzaba; ahora sí,
+        como mobile. Test gemelo `crypto/signal/__tests__/ratchet.zeroize.test.ts` (mobile y desktop).
+      - Barrido constant-time: las comprobaciones de escritura-y-relectura de secretos de prekeys
+        en mobile (`x3dh.ts`, `registration.ts`, `socket/client.ts`) comparaban la clave con `===`;
+        pasan a `secretB64Equals` (`crypto/secretEquals.ts`, test `secretEquals.test.ts`). El resto
+        ya usaba `nacl.verify` / `timingSafeEqual`; lo que queda con `===` son datos públicos.
 
 ## Hito 4 — Paridad de plataforma y alcance 🟡
 
 - [x] **iOS**: publicado en App Store desde 1.0.x (release 1.0.6 live, iOS build 33); el pinning TLS
       cubre ambas plataformas (`mobile/app.json` + `app.plugin.js`).
-- [ ] **Desktop media wiring**: cerrar `[[bug_desktop_media_not_wired]]` (UI de adjuntos desktop).
+- [x] **Desktop media wiring** ✅ (2026-09-25): el desktop solo reconocía la URI `blob:` v1 (4 partes)
+      y la imagen sin pie, así que los adjuntos de los clientes actuales (v2/v3) salían rotos o como
+      texto, y guardaba una URL temporal que moría al reiniciar. Ahora lee todos los formatos del
+      móvil (imagen con pie, vídeo, audio, archivo, álbum `[multi:N]`), guarda la referencia cifrada
+      y descifra al pintar (`utils/incomingMedia.ts`, `hooks/useMediaUrl.ts`,
+      `components/MediaBubbles.tsx`); los archivos se guardan con un clic y los caducados avisan.
+      Al enviar, el desktop metía todo lo elegido (PDF, ZIP…) en `[image:…]`; ahora manda vídeo y
+      archivo con su formato (`utils/outgoingMedia.ts`), y las imágenes del botón directo del chat
+      salen sin metadatos EXIF/GPS (`utils/stripImageMetadata.ts`, fail-closed; antes solo las
+      limpiaba la hoja de adjuntos). Tests `incomingMedia.test.ts`, `outgoingMedia.test.ts`,
+      `useMediaUrl.test.ts`. Pendiente: copia local cifrada (como mobile) para que los adjuntos
+      sobrevivan al TTL de 24 h del relay.
 - [ ] **Paridad mobile↔desktop** continua: mantener los parity-tests de los dos `socket/client.ts` como
       lever (no refactor cosmético — decisión M4).
 - [ ] **F-2 — UnifiedPush**: transporte wake-up sin Google/Apple (ntfy/Gotify), FCM/APNs como fallback.
@@ -217,7 +261,10 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
 
 - [ ] **M5 — `any`** (~40 restantes, triados): reducir al tocar cada archivo; contrato IPC desktop es el cluster grande.
 - [ ] **God-files**: política vigente = NO retro-acortar los 4 aceptados; escribir archivos nuevos <800 desde el inicio.
-- [ ] **Lint `no-console`** en `desktop/src/renderer/**` para prevenir regresión del logger.
+- [x] **Guard `no-console`** en `desktop/src/renderer/**` ✅ (2026-09-25): el desktop no usa ESLint, así
+      que es un test que escanea el código (como `crypto-imports.test.ts`) y falla ante cualquier
+      `console.*` fuera de `utils/logger.ts` (`utils/__tests__/noConsole.test.ts`). Los dos avisos de
+      `socket/calls.ts` pasan por el logger.
 - [x] **SESSION_HANDOFF.md** (fechado 2026-06-05, obsoleto): **archivado** con cabecera
       que enumera qué es falso (relay AWS muerto, §5 ya mergeado) y redirige a
       [`AUDIT-2026-08-FUNCTIONAL.md`](./AUDIT-2026-08-FUNCTIONAL.md). Nota: el archivo

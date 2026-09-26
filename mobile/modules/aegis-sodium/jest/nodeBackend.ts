@@ -11,13 +11,17 @@
  * `desktop/src/main/crypto/sodium/boxBefore.ts`) and node:crypto HMAC.
  * Argon2id: libsodium's crypto_pwhash for 16-byte salts; @noble/hashes for the
  * rest (sodium-native exposes no other salt length, and node:crypto has no
- * Argon2 before Node 24.7).
+ * Argon2 before Node 24.7). The proof-of-work miner is the C core's loop over
+ * libsodium's SHA-256. ML-KEM-768: @noble/post-quantum (sodium-native has no
+ * ML-KEM), with the C core's lengths and return codes; the C core is diffed
+ * against it byte for byte.
  *
  * The shipped C core itself is tested against TweetNaCl/@noble by
  * `../test/differential.mjs` (CI job `aegis-sodium-native`).
  */
-import { createHmac } from 'node:crypto';
-import { argon2id } from '@noble/hashes/argon2';
+import { createHmac, pbkdf2Sync } from 'node:crypto';
+import { argon2id } from '@noble/hashes/argon2.js';
+import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import sodium from 'sodium-native';
 import type { AegisSodiumNative } from '../index';
 
@@ -33,6 +37,9 @@ const KEY = 32;
 const SIGN_SK = 64;
 const SIG = 64;
 const HKDF_MAX = 255 * 32;
+const MLKEM_PK = 1184;
+const MLKEM_SK = 2400;
+const MLKEM_CT = 1088;
 
 // "expand 32-byte k", little-endian words (HSalsa20 = Salsa20 core without feed-forward).
 const SIGMA = [0x61707865, 0x3320646e, 0x79622d32, 0x6b206574];
@@ -178,8 +185,7 @@ const nodeBackend: AegisSodiumNative = {
     // A 16-byte salt (the app-lock PIN's per-install salt) goes to real libsodium:
     // crypto_pwhash with Argon2id v1.3, one lane, is the same function as the C
     // core's argon2id_hash_raw. Other salt lengths (backup: 32 B, duress: a domain
-    // string) fall back to @noble, sync: argon2idAsync would pick up the app's
-    // setTimeout-yield patch (crypto/nobleNextTickPatch) and crawl.
+    // string) fall back to @noble's argon2id.
     if (salt.length === sodium.crypto_pwhash_SALTBYTES) {
       const out = new Uint8Array(outLen);
       sodium.crypto_pwhash(out, pwd, salt, t, mKib * 1024, sodium.crypto_pwhash_ALG_ARGON2ID13);
@@ -187,6 +193,72 @@ const nodeBackend: AegisSodiumNative = {
     }
     return Array.from(argon2id(pwd, salt, { t, m: mKib, p: 1, dkLen: outLen }));
   },
+  pbkdf2Sha256: async (pwd, salt, iterations, outLen) => {
+    const ok =
+      isBytes(pwd) && isBytes(salt) && pwd.length <= 65536 && salt.length <= 1024 &&
+      Number.isInteger(outLen) && outLen >= 1 && outLen <= 64 &&
+      Number.isInteger(iterations) && iterations >= 1 && iterations <= 10_000_000;
+    if (!ok) throw new Error(`aegis_pbkdf2_sha256 failed: ${EBADLEN}`);
+    return Array.from(pbkdf2Sync(pwd, salt, iterations, outLen, 'sha256'));
+  },
+  mlkem768Keypair: (pk, sk) => {
+    if (!len([pk, MLKEM_PK], [sk, MLKEM_SK])) return EBADLEN;
+    const k = ml_kem768.keygen();
+    pk.set(k.publicKey);
+    sk.set(k.secretKey);
+    return OK;
+  },
+  mlkem768SeedKeypair: (pk, sk, seed) => {
+    if (!len([pk, MLKEM_PK], [sk, MLKEM_SK], [seed, 64])) return EBADLEN;
+    const k = ml_kem768.keygen(seed);
+    pk.set(k.publicKey);
+    sk.set(k.secretKey);
+    return OK;
+  },
+  mlkem768Enc: (ct, ss, pk) => {
+    if (!len([ct, MLKEM_CT], [ss, 32], [pk, MLKEM_PK])) return EBADLEN;
+    try {
+      const e = ml_kem768.encapsulate(pk);
+      ct.set(e.cipherText);
+      ss.set(e.sharedSecret);
+      return OK;
+    } catch {
+      return EFAIL; // FIPS 203 encapsulation-key check, as in the C core
+    }
+  },
+  mlkem768Dec: (ss, ct, sk) => {
+    if (!len([ss, 32], [ct, MLKEM_CT], [sk, MLKEM_SK])) return EBADLEN;
+    try {
+      ss.set(ml_kem768.decapsulate(ct, sk));
+      return OK;
+    } catch {
+      return EFAIL; // FIPS 203 decapsulation-key (hash) check, as in the C core
+    }
+  },
+  // The C core's miner, step for step: nonces "00000000", "00000001", ... hashed
+  // in front of the challenge with libsodium's SHA-256.
+  powSha256: async (challenge, difficulty) => {
+    const ok =
+      isBytes(challenge) && challenge.length >= 1 && challenge.length <= 512 &&
+      Number.isInteger(difficulty) && difficulty >= 0 && difficulty <= 32;
+    if (!ok) throw new Error(`aegis_pow_sha256 failed: ${EBADLEN}`);
+    const buf = new Uint8Array(8 + challenge.length);
+    buf.set(challenge, 8);
+    const digest = new Uint8Array(32);
+    for (let i = 0; i <= 0xffffffff; i++) {
+      const nonce = i.toString(16).padStart(8, '0');
+      for (let k = 0; k < 8; k++) buf[k] = nonce.charCodeAt(k);
+      sodium.crypto_hash_sha256(digest, buf);
+      if (leadingZeroBits(digest, difficulty)) return nonce;
+    }
+    throw new Error(`aegis_pow_sha256 failed: ${EFAIL}`);
+  },
 };
+
+function leadingZeroBits(d: Uint8Array, bits: number): boolean {
+  const full = Math.floor(bits / 8);
+  for (let i = 0; i < full; i++) if (d[i] !== 0) return false;
+  return bits % 8 === 0 || (d[full] & (0xff << (8 - (bits % 8)))) === 0;
+}
 
 export default nodeBackend;

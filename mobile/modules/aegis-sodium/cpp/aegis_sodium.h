@@ -84,6 +84,54 @@ int aegis_hkdf_sha256(uint8_t *out, size_t outlen, const uint8_t *ikm, size_t ik
 int aegis_argon2id(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdlen, const uint8_t *salt,
                    size_t saltlen, uint32_t t_cost, uint32_t m_kib);
 
+/*
+ * Registration proof-of-work (the relay's server/src/pow/challenge.ts): find
+ * the first 8-hex-digit nonce "00000000", "00000001", ... "ffffffff" such that
+ * SHA-256(nonce || challenge) starts with `difficulty` zero bits, and write its
+ * 8 ASCII characters to `nonce`. Same order, and so the same nonce, as the
+ * JavaScript miner it replaces. AEGIS_EFAIL if none of the 2^32 nonces works
+ * (never at the relay's difficulties, 12-18). Seconds of work on Hermes, a
+ * fraction of a second here: the bindings run it off the JS thread.
+ */
+#define AEGIS_POW_NONCE_LEN 8
+#define AEGIS_POW_CHALLENGE_MAX 512
+#define AEGIS_POW_DIFFICULTY_MAX 32
+int aegis_pow_sha256(uint8_t *nonce, size_t noncelen, const uint8_t *challenge, size_t challen, uint32_t difficulty);
+
+/*
+ * ML-KEM-768 (FIPS 203), libsodium's crypto_kem_mlkem768. Byte-compatible with
+ * @noble/post-quantum, which the app used before: same seed -> key pair, same
+ * 2400-byte expanded secret key (dk), same ciphertexts and shared secrets, same
+ * implicit rejection of a tampered ciphertext, so stored PQ prekeys and ratchet
+ * states keep working. The shared secret is secret: callers zero it when done.
+ */
+#define AEGIS_MLKEM768_PK 1184
+#define AEGIS_MLKEM768_SK 2400
+#define AEGIS_MLKEM768_CT 1088
+#define AEGIS_MLKEM768_SS 32
+#define AEGIS_MLKEM768_SEED 64
+int aegis_mlkem768_keypair(uint8_t *pk, size_t pklen, uint8_t *sk, size_t sklen);
+/* Deterministic key pair from a 64-byte seed (d || z); for test vectors. */
+int aegis_mlkem768_seed_keypair(uint8_t *pk, size_t pklen, uint8_t *sk, size_t sklen, const uint8_t *seed,
+                                size_t seedlen);
+/* AEGIS_EFAIL if the public key fails FIPS 203's encapsulation-key check. */
+int aegis_mlkem768_enc(uint8_t *ct, size_t ctlen, uint8_t *ss, size_t sslen, const uint8_t *pk, size_t pklen);
+/* AEGIS_OK for any well-formed ciphertext (implicit rejection); AEGIS_EFAIL if the secret key
+ * fails FIPS 203's hash check (H(ek) embedded in dk), as @noble's decapsulate does. */
+int aegis_mlkem768_dec(uint8_t *ss, size_t sslen, const uint8_t *ct, size_t ctlen, const uint8_t *sk, size_t sklen);
+
+/*
+ * PBKDF2-HMAC-SHA256 (RFC 8018), for restoring legacy v1/v2 backups (100k and
+ * 600k iterations). Byte-identical to @noble/hashes pbkdf2(sha256, ...), which
+ * wrote them. Slow by design: the bindings run it off the JS thread.
+ */
+#define AEGIS_PBKDF2_OUT_MAX 64
+#define AEGIS_PBKDF2_PWD_MAX 65536
+#define AEGIS_PBKDF2_SALT_MAX 1024
+#define AEGIS_PBKDF2_ITER_MAX 10000000
+int aegis_pbkdf2_sha256(uint8_t *out, size_t outlen, const uint8_t *pwd, size_t pwdlen, const uint8_t *salt,
+                        size_t saltlen, uint32_t iterations);
+
 #ifdef __cplusplus
 }
 #endif

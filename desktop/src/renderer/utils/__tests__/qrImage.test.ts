@@ -7,6 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import QRCode from 'qrcode';
 import { decodeQrPixels } from '../qrImage';
+import { normalizeOnion } from '../../net/relayRef';
 
 /** Render a QR into an RGBA buffer, `scale` px per module, 4-module quiet zone. */
 function renderQr(text: string, scale = 6, invert = false): { data: Uint8ClampedArray; width: number; height: number } {
@@ -47,5 +48,16 @@ describe('decodeQrPixels', () => {
     const side = 200;
     const data = new Uint8ClampedArray(side * side * 4).fill(255);
     expect(decodeQrPixels(data, side, side)).toBeNull();
+  });
+
+  // "My relay" → Import QR image: the QR that infra/selfhost/show-qr.sh
+  // prints encodes `http://<onion>` and must come out as the canonical host;
+  // a contact QR must not (RelaySettings rejects it as qr_not_relay).
+  it('decodes a self-host relay QR (light-on-dark terminal screenshot) to its onion', () => {
+    const onion = 'abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuvwx.onion';
+    const { data, width, height } = renderQr(`http://${onion}`, 6, true);
+    expect(normalizeOnion(decodeQrPixels(data, width, height))).toBe(onion);
+    const contact = renderQr(PAYLOAD);
+    expect(normalizeOnion(decodeQrPixels(contact.data, contact.width, contact.height))).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,7 +16,7 @@
   html { background: var(--bg); }
   body { font-family: var(--sans); color: var(--text); line-height: 1.65; -webkit-font-smoothing: antialiased; }
   .wrap { max-width: 780px; margin: 0 auto; padding: 48px 22px 80px; }
-  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 40px; }
   header a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 20px; display: flex; align-items: center; gap: 12px; }
   h1 { font-size: 34px; line-height: 1.15; margin-bottom: 10px; }
   .meta { font-family: var(--mono); font-size: 13px; color: var(--accent); margin-bottom: 36px; }
@@ -34,7 +34,18 @@
   th { color: var(--text); background: var(--bg-2); }
   .note { font-style: italic; margin-top: 42px; color: var(--dim); font-size: 14.5px; }
   footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--dim); }
+  .lang-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+  .lang-switch button { background: transparent; border: none; color: var(--dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; padding: 7px 10px; cursor: pointer; }
+  .lang-switch button:hover { color: var(--text); }
+  .lang-switch button.active { background: rgba(91,242,185,0.14); color: var(--accent); }
+  /* lang.js sets html[data-lang]; without JS the English copy shows. */
+  html[data-lang="en"] [data-l]:not([data-l="en"]),
+  html[data-lang="es"] [data-l]:not([data-l="es"]),
+  html[data-lang="it"] [data-l]:not([data-l="it"]) { display: none !important; }
 </style>
+<script type="application/json" id="i18n-meta">{"en":{"title":"Legal Requests & Transparency — AegisLink","desc":"What AegisLink can and cannot produce in response to a legal order — written from the architecture, which is open source and verifiable."},
+ "es":{"title":"Solicitudes legales y transparencia — AegisLink","desc":"Qué puede y qué no puede entregar AegisLink en respuesta a una orden legal — escrito a partir de la arquitectura, que es de código abierto y verificable."},
+ "it":{"title":"Richieste legali e trasparenza — AegisLink","desc":"Cosa può e non può fornire AegisLink in risposta a un ordine legale — scritto a partire dall'architettura, che è open source e verificabile."}}</script>
 </head>
 <body>
 <div class="wrap">
@@ -43,8 +54,54 @@
       <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/><rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/><rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/></svg>
       AegisLink
     </a>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="es" lang="es">ES</button>
+      <button type="button" data-lang="en" lang="en">EN</button>
+      <button type="button" data-lang="it" lang="it">IT</button>
+    </div>
   </header>
 
+  <main data-l="es">
+  <h1>Solicitudes legales y transparencia</h1>
+  <p><strong>Qué puede — y qué no puede — entregar AegisLink en respuesta a una orden legal.</strong></p>
+  <p class="note">Traducción de cortesía. En caso de discrepancia, prevalece la versión en inglés.</p>
+  <p>Esta página existe para que usuarios, periodistas y autoridades conozcan la respuesta <em>antes</em> de que nadie pregunte. Está escrita a partir de la arquitectura del sistema, que es de código abierto y verificable de forma independiente: la respuesta honesta a la mayoría de las solicitudes es que <strong>los datos no existen</strong>, no que nos neguemos a entregarlos.</p>
+  <h2>La versión corta</h2>
+  <p>AegisLink está diseñado para que el operador guarde lo más parecido a nada que sea posible. No podemos descifrar mensajes, no conocemos los nombres, números de teléfono ni direcciones de correo electrónico de los usuarios (nunca los recopilamos) y no guardamos registros de quién habla con quién, cuándo ni con qué frecuencia. Un requerimiento judicial no puede obligarnos a entregar registros que nunca se crearon.</p>
+  <h2>Lo que NO tenemos</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Lo que se suele pedir</th><th>Nuestra respuesta</th></tr>
+    <tr><td>Nombre real, número de teléfono o correo electrónico del usuario</td><td><strong>Nunca se recopilan.</strong> El registro crea un par de claves en el dispositivo del usuario; no se piden datos personales en ningún momento.</td></tr>
+    <tr><td>Contenido de los mensajes</td><td><strong>No podemos descifrarlo.</strong> Todos los mensajes están cifrados de extremo a extremo (X3DH + Double Ratchet); las claves privadas solo existen en los dispositivos de los usuarios.</td></tr>
+    <tr><td>Adjuntos, contenido de las llamadas de voz/vídeo</td><td><strong>No podemos descifrarlos.</strong> Los adjuntos se cifran en el cliente; las llamadas son entre pares con DTLS-SRTP, y la señalización de las llamadas se sella antes de llegar al relay.</td></tr>
+    <tr><td>Listas de contactos / grafo social</td><td><strong>No se almacenan.</strong> Los contactos viven solo en el dispositivo del usuario. El relay enruta sobres cifrados individuales y no guarda ningún registro de las relaciones.</td></tr>
+    <tr><td>Historial de mensajes</td><td><strong>No se almacena.</strong> El relay guarda en cola un mensaje cifrado solo hasta que se entrega, y después lo elimina.</td></tr>
+    <tr><td>Registros de acceso, registros de IP, horas de inicio de sesión</td><td><strong>No se registran</strong>, por configuración y por diseño (<code>access_log off</code>; la aplicación no guarda registros de acceso por usuario).</td></tr>
+    <tr><td>Registros de frecuencia de mensajes / de análisis de tráfico</td><td><strong>No se almacenan.</strong> Además, los mensajes se rellenan hasta tamaños fijos por tramos, así que incluso los textos cifrados almacenados filtran una información mínima.</td></tr>
+    <tr><td>Datos de ubicación</td><td><strong>Nunca se recopilan.</strong> La app no pide permisos de ubicación.</td></tr>
+    <tr><td>Información de pago</td><td><strong>No aplica.</strong> Sin cuentas, sin datos de facturación vinculados a identidades.</td></tr>
+  </table></div>
+  <h2>Lo que SÍ tenemos (lista completa)</h2>
+  <p>Ser honestos sobre lo que queda importa más que un mensaje de marketing impecable:</p>
+  <ul>
+    <li><strong>Material de clave pública</strong>: claves públicas de identidad, prekeys firmadas y prekeys de un solo uso que publican los dispositivos para que otros puedan iniciar sesiones cifradas. Es material criptográfico público por diseño.</li>
+    <li><strong>Sobres cifrados no entregados</strong>: textos cifrados opacos en cola para destinatarios sin conexión, que se eliminan al entregarse. No podemos leerlos.</li>
+    <li><strong>Tokens de push</strong>: un token de FCM/APNs por cada dispositivo que quiera recibir notificaciones de activación. El contenido del push nunca incluye contenido ni la identidad del remitente — es un "despierta" genérico. El token lo guarda la infraestructura de Google/Apple, como en cualquier app que use push.</li>
+    <li><strong>Datos de conexión transitorios</strong>: como cualquier servidor de Internet, el relay ve la dirección IP de un cliente conectado <em>en el momento de la conexión</em>. No la registramos ni la asociamos a identidades. Los usuarios cuyo modelo de amenazas incluya la observación a nivel de red deberían conectarse a través de Tor o de una VPN.</li>
+  </ul>
+  <h2>Nuestros compromisos</h2>
+  <ul>
+    <li>Nunca añadiremos una puerta trasera, custodia de claves (key escrow) ni escaneo en el cliente. Los clientes son GPL-3.0 y el relay es AGPL-3.0 — un servidor modificado debe publicar su código fuente, y de todos modos el protocolo trata al servidor como no confiable: ni siquiera un relay totalmente malicioso puede leer mensajes ni falsificar identidades (ver <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>, modelo de amenazas).</li>
+    <li>Responderemos a los requerimientos legales válidos con lo que existe — que es la lista anterior — y no inventaremos capacidades que no tenemos.</li>
+    <li>Cuando la ley lo permita, notificaremos a los usuarios afectados las solicitudes que les conciernan y publicaremos estadísticas agregadas sobre las solicitudes recibidas.</li>
+    <li>Si alguna vez se nos obliga legalmente a cambiar algo de lo anterior, lo diremos en la máxima medida que permita la ley. Sin embargo, la garantía más fuerte es estructural: <strong>cualquiera puede montar su propio relay</strong> y no quedar sujeto a ningún operador.</li>
+  </ul>
+  <h2>Verifica, no confíes</h2>
+  <p>Cada afirmación de esta página se puede comprobar en el código fuente: el relay (<code>server/</code>), la capa de eliminación de metadatos y relleno (<code>mobile/src/crypto/metadata.ts</code>) y el documento del protocolo (<a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>). Si encuentras una discrepancia entre esta página y el código, es un problema de seguridad — repórtalo a través de <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+  <p class="note">Contacto para requerimientos legales: <a href="mailto:gabinotech22@gmail.com">gabinotech22@gmail.com</a></p>
+  </main>
+
+  <main data-l="en">
   <h1>Legal Requests &amp; Transparency</h1>
   <p><strong>What AegisLink can — and cannot — produce in response to a legal order.</strong></p>
   <p>This page exists so that users, journalists and authorities all know the answer <em>before</em> anyone asks. It is written from the system's architecture, which is open source and independently verifiable: the honest answer to most requests is that <strong>the data does not exist</strong>, not that we refuse to hand it over.</p>
@@ -81,8 +138,54 @@
   <h2>Verify, don't trust</h2>
   <p>Every claim on this page is checkable in the source code: the relay (<code>server/</code>), the metadata-stripping and padding layer (<code>mobile/src/crypto/metadata.ts</code>), and the protocol document (<a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>). If you find a discrepancy between this page and the code, that is a security issue — please report it via <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md">SECURITY.md</a>.</p>
   <p class="note">Contact for legal process: <a href="mailto:gabinotech22@gmail.com">gabinotech22@gmail.com</a></p>
+  </main>
 
-  <footer>&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacy</a> &middot; <a href="/terms.html">Terms</a> &middot; <a href="/legal.html">Legal requests</a></footer>
+  <main data-l="it">
+  <h1>Richieste legali e trasparenza</h1>
+  <p><strong>Cosa può — e non può — fornire AegisLink in risposta a un ordine legale.</strong></p>
+  <p class="note">Traduzione di cortesia. In caso di discrepanza prevale la versione inglese.</p>
+  <p>Questa pagina esiste perché utenti, giornalisti e autorità conoscano la risposta <em>prima</em> che qualcuno la chieda. È scritta a partire dall'architettura del sistema, che è open source e verificabile in modo indipendente: la risposta onesta alla maggior parte delle richieste è che <strong>i dati non esistono</strong>, non che ci rifiutiamo di consegnarli.</p>
+  <h2>In breve</h2>
+  <p>AegisLink è progettato in modo che l'operatore detenga il più vicino possibile al nulla. Non possiamo decifrare i messaggi, non conosciamo nomi, numeri di telefono o indirizzi email degli utenti (non li raccogliamo mai) e non conserviamo registri di chi parla con chi, quando o con quale frequenza. Un ordine di esibizione non può obbligarci a produrre registri che non sono mai stati creati.</p>
+  <h2>Cosa NON abbiamo</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Richiesto di frequente</th><th>La nostra risposta</th></tr>
+    <tr><td>Nome reale, numero di telefono, email dell'utente</td><td><strong>Mai raccolti.</strong> La registrazione crea una coppia di chiavi sul dispositivo dell'utente; non vengono richiesti dati personali in alcun momento.</td></tr>
+    <tr><td>Contenuto dei messaggi</td><td><strong>Non possiamo decifrarlo.</strong> Tutti i messaggi sono cifrati end-to-end (X3DH + Double Ratchet); le chiavi private esistono solo sui dispositivi degli utenti.</td></tr>
+    <tr><td>Allegati, contenuto delle chiamate vocali/video</td><td><strong>Non possiamo decifrarli.</strong> Gli allegati sono cifrati lato client; le chiamate sono peer-to-peer con DTLS-SRTP e la segnalazione delle chiamate viene sigillata prima di raggiungere il relay.</td></tr>
+    <tr><td>Elenchi dei contatti / grafo sociale</td><td><strong>Non conservati.</strong> I contatti risiedono solo sul dispositivo dell'utente. Il relay instrada singole buste cifrate e non conserva alcuna traccia delle relazioni.</td></tr>
+    <tr><td>Cronologia dei messaggi</td><td><strong>Non conservata.</strong> Il relay tiene in coda un messaggio cifrato solo fino alla consegna, poi lo elimina.</td></tr>
+    <tr><td>Log di accesso, log degli IP, orari di accesso</td><td><strong>Non registrati</strong>, per configurazione e per progettazione (<code>access_log off</code>; l'applicazione non conserva registri di accesso per utente).</td></tr>
+    <tr><td>Registri sulla frequenza dei messaggi / di analisi del traffico</td><td><strong>Non conservati.</strong> Inoltre, i messaggi vengono riempiti (padding) fino a dimensioni fisse a scaglioni, quindi anche i testi cifrati conservati rivelano informazioni minime.</td></tr>
+    <tr><td>Dati di posizione</td><td><strong>Mai raccolti.</strong> L'app non richiede permessi di localizzazione.</td></tr>
+    <tr><td>Informazioni di pagamento</td><td><strong>Non applicabile.</strong> Nessun account, nessun dato di fatturazione legato alle identità.</td></tr>
+  </table></div>
+  <h2>Cosa ABBIAMO (elenco completo)</h2>
+  <p>Essere onesti su ciò che resta conta più di uno slogan di marketing impeccabile:</p>
+  <ul>
+    <li><strong>Materiale di chiave pubblica</strong>: chiavi pubbliche d'identità, prekey firmate e prekey monouso pubblicate dai dispositivi affinché altri possano avviare sessioni cifrate. È materiale crittografico pubblico per progettazione.</li>
+    <li><strong>Buste cifrate non consegnate</strong>: testi cifrati opachi in coda per destinatari offline, eliminati alla consegna. Non possiamo leggerli.</li>
+    <li><strong>Token push</strong>: un token FCM/APNs per ogni dispositivo che vuole ricevere notifiche di risveglio. Il payload push non contiene mai contenuti né l'identità del mittente — è un generico "sveglia". Il token è detenuto dall'infrastruttura di Google/Apple, come per qualsiasi app che usa le notifiche push.</li>
+    <li><strong>Dati di connessione transitori</strong>: come qualsiasi server Internet, il relay vede l'indirizzo IP di un client connesso <em>al momento della connessione</em>. Non lo registriamo né lo associamo a identità. Gli utenti il cui modello di minaccia include l'osservazione a livello di rete dovrebbero connettersi tramite Tor o una VPN.</li>
+  </ul>
+  <h2>I nostri impegni</h2>
+  <ul>
+    <li>Non aggiungeremo mai una backdoor, un deposito delle chiavi (key escrow) o una scansione lato client. I client sono GPL-3.0 e il relay è AGPL-3.0 — un server modificato deve pubblicare il proprio sorgente, e il protocollo tratta comunque il server come non fidato: nemmeno un relay completamente malevolo può leggere i messaggi o falsificare identità (vedi <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>, modello di minaccia).</li>
+    <li>Risponderemo alle richieste legali valide con ciò che esiste — ossia l'elenco qui sopra — e non inventeremo capacità che non abbiamo.</li>
+    <li>Ove consentito dalla legge, informeremo gli utenti interessati delle richieste che li riguardano e pubblicheremo statistiche aggregate sulle richieste ricevute.</li>
+    <li>Se mai fossimo legalmente obbligati a modificare qualcosa di quanto sopra, lo diremo nella misura massima consentita dalla legge. La garanzia più forte, tuttavia, è strutturale: <strong>chiunque può avviare il proprio relay</strong> e non essere soggetto ad alcun operatore.</li>
+  </ul>
+  <h2>Verifica, non fidarti</h2>
+  <p>Ogni affermazione di questa pagina è verificabile nel codice sorgente: il relay (<code>server/</code>), lo strato di rimozione dei metadati e di padding (<code>mobile/src/crypto/metadata.ts</code>) e il documento del protocollo (<a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>). Se trovi una discrepanza tra questa pagina e il codice, si tratta di un problema di sicurezza — segnalalo tramite <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+  <p class="note">Contatto per richieste legali: <a href="mailto:gabinotech22@gmail.com">gabinotech22@gmail.com</a></p>
+  </main>
+
+  <footer>
+    <span data-l="en">&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacy</a> &middot; <a href="/terms.html">Terms</a> &middot; <a href="/legal.html">Legal requests</a></span>
+    <span data-l="es">&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacidad</a> &middot; <a href="/terms.html">Términos</a> &middot; <a href="/legal.html">Solicitudes legales</a></span>
+    <span data-l="it">&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacy</a> &middot; <a href="/terms.html">Termini</a> &middot; <a href="/legal.html">Richieste legali</a></span>
+  </footer>
 </div>
+<script src="/lang.js"></script>
 </body>
 </html>

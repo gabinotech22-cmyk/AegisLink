@@ -10,10 +10,12 @@
  * `modules/aegis-sodium/test/differential.mjs` (CI job `aegis-sodium-native`).
  */
 import tweetnacl from 'tweetnacl';
-import { hmac } from '@noble/hashes/hmac';
-import { hkdf } from '@noble/hashes/hkdf';
-import { sha256 as nobleSha256 } from '@noble/hashes/sha2';
-import { argon2id as nobleArgon2id } from '@noble/hashes/argon2';
+import { hmac } from '@noble/hashes/hmac.js';
+import { hkdf } from '@noble/hashes/hkdf.js';
+import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
+import { argon2id as nobleArgon2id } from '@noble/hashes/argon2.js';
+import { pbkdf2 as noblePbkdf2 } from '@noble/hashes/pbkdf2.js';
+import { ml_kem768 as nobleMlKem } from '@noble/post-quantum/ml-kem.js';
 import { nacl, hmacSha256, hkdfSha256, argon2id } from '../sodium';
 import { verifyDetached } from '../ed25519';
 
@@ -228,5 +230,110 @@ describe('native return codes are never ignored', () => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       expect(() => require('../sodium')).toThrow(/failed to initialize/);
     });
+  });
+});
+
+describe('powSha256 (native, async)', () => {
+  it('fails closed on a native rejection or a malformed nonce', async () => {
+    const results = [
+      () => Promise.reject(new Error('aegis_pow_sha256 failed: -2')),
+      () => Promise.resolve('0000000'),
+      () => Promise.resolve('0000000G'),
+      () => Promise.resolve(undefined),
+    ];
+    for (const result of results) {
+      let facade!: typeof import('../sodium');
+      jest.isolateModules(() => {
+        jest.doMock('../../../modules/aegis-sodium', () => {
+          const real = jest.requireActual('../../../modules/aegis-sodium/jest/nodeBackend');
+          return { __esModule: true, ...real, default: { ...real.default, powSha256: result } };
+        });
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        facade = require('../sodium') as typeof import('../sodium');
+      });
+      await expect(facade.powSha256(new Uint8Array([0x61]), 1)).rejects.toThrow(/pow_?sha256 failed/i);
+    }
+  });
+
+  it('rejects out-of-range parameters before calling native code', async () => {
+    const { powSha256 } = await import('../sodium');
+    await expect(powSha256(new Uint8Array(0), 1)).rejects.toThrow(/challenge/);
+    await expect(powSha256(new Uint8Array(513), 1)).rejects.toThrow(/challenge/);
+    await expect(powSha256(new Uint8Array(1), 33)).rejects.toThrow(/difficulty/);
+    await expect(powSha256(new Uint8Array(1), -1)).rejects.toThrow(/difficulty/);
+    await expect(powSha256(new Uint8Array(1), 1.5)).rejects.toThrow(/difficulty/);
+  });
+});
+
+describe('ml_kem768 (native)', () => {
+  it('is byte-identical to @noble/post-quantum and reads keys it made', async () => {
+    const { ml_kem768 } = await import('../sodium');
+    for (let i = 0; i < 20; i++) {
+      const seed = rand(64);
+      const mine = ml_kem768.keygen(seed);
+      const theirs = nobleMlKem.keygen(seed);
+      expect(mine.publicKey).toEqual(theirs.publicKey);
+      expect(mine.secretKey).toEqual(theirs.secretKey);
+      expect(ml_kem768.getPublicKey(theirs.secretKey)).toEqual(theirs.publicKey);
+      // A key stored by the old code (@noble, no seed) decapsulates natively...
+      const stored = nobleMlKem.keygen();
+      const e = nobleMlKem.encapsulate(stored.publicKey);
+      expect(ml_kem768.decapsulate(e.cipherText, stored.secretKey)).toEqual(e.sharedSecret);
+      // ...and a peer still on @noble decapsulates what we encapsulate.
+      const mineE = ml_kem768.encapsulate(stored.publicKey);
+      expect(nobleMlKem.decapsulate(mineE.cipherText, stored.secretKey)).toEqual(mineE.sharedSecret);
+      // Implicit rejection: a tampered ciphertext gives @noble's pseudo-random secret, no throw.
+      const bad = e.cipherText.slice();
+      bad[i] ^= 1;
+      expect(ml_kem768.decapsulate(bad, stored.secretKey)).toEqual(nobleMlKem.decapsulate(bad, stored.secretKey));
+    }
+  });
+
+  it('getPublicKey returns a copy, not a view into the secret key', async () => {
+    const { ml_kem768 } = await import('../sodium');
+    const k = ml_kem768.keygen();
+    const pk = ml_kem768.getPublicKey(k.secretKey);
+    pk.fill(0);
+    expect(ml_kem768.getPublicKey(k.secretKey)).toEqual(k.publicKey);
+  });
+
+  it('fails closed: wrong lengths, an invalid public key and a corrupted secret key throw', async () => {
+    const { ml_kem768 } = await import('../sodium');
+    const k = ml_kem768.keygen();
+    const e = ml_kem768.encapsulate(k.publicKey);
+    expect(() => ml_kem768.keygen(rand(63))).toThrow(/seed must be 64 bytes/);
+    expect(() => ml_kem768.encapsulate(rand(1183))).toThrow(/bad public key size/);
+    expect(() => ml_kem768.decapsulate(rand(1087), k.secretKey)).toThrow(/bad ciphertext size/);
+    expect(() => ml_kem768.decapsulate(e.cipherText, rand(2399))).toThrow(/bad secret key size/);
+    expect(() => ml_kem768.getPublicKey(rand(1184))).toThrow(/bad secret key size/);
+    const nonCanonical = k.publicKey.slice();
+    nonCanonical[0] = 0xff;
+    nonCanonical[1] |= 0x0f;
+    expect(() => ml_kem768.encapsulate(nonCanonical)).toThrow(/mlkem768 encapsulate failed/);
+    const corrupt = k.secretKey.slice();
+    corrupt[1152 + 1184] ^= 1;
+    expect(() => ml_kem768.decapsulate(e.cipherText, corrupt)).toThrow(/mlkem768 decapsulate failed/);
+    expect(() => ml_kem768.encapsulate('x' as unknown as Uint8Array)).toThrow(TypeError);
+  });
+});
+
+describe('pbkdf2Sha256 (native, async)', () => {
+  it('matches @noble pbkdf2(sha256) and RFC 7914 §11', async () => {
+    const { pbkdf2Sha256 } = await import('../sodium');
+    const enc = new TextEncoder();
+    const rfc = await pbkdf2Sha256(enc.encode('passwd'), enc.encode('salt'), 1, 64);
+    expect(Buffer.from(rfc).toString('hex')).toBe(
+      '55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc49ca9cccf179b645991664b39d77ef317c71b845b1e30bd509112041d3a19783',
+    );
+    for (const [pwd, salt, c] of [[rand(20), rand(32), 1000], [new Uint8Array(0), rand(16), 3], [rand(200), new Uint8Array(0), 2]] as const) {
+      expect(await pbkdf2Sha256(pwd, salt, c, 32)).toEqual(noblePbkdf2(nobleSha256, pwd, salt, { c, dkLen: 32 }));
+    }
+  });
+
+  it('rejects out-of-range parameters before calling native code', async () => {
+    const { pbkdf2Sha256 } = await import('../sodium');
+    await expect(pbkdf2Sha256(rand(4), rand(16), 0, 32)).rejects.toThrow(/iterations/);
+    await expect(pbkdf2Sha256(rand(4), rand(16), 1, 65)).rejects.toThrow(/dkLen/);
+    await expect(pbkdf2Sha256(rand(4), rand(1025), 1, 32)).rejects.toThrow(/salt/);
   });
 });

@@ -1,8 +1,5 @@
-import { nacl, argon2id } from './sodium';
+import { nacl, argon2id, pbkdf2Sha256 } from './sodium';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
-import { pbkdf2Async } from '@noble/hashes/pbkdf2';
-import { sha256 } from '@noble/hashes/sha256';
-import { KDF_ASYNC_TICK_MS } from './nobleNextTickPatch';
 
 // ─── AegisLink encrypted backup format ────────────────────────────────────────
 //
@@ -30,8 +27,8 @@ import { KDF_ASYNC_TICK_MS } from './nobleNextTickPatch';
 // Runtime note: the v3 Argon2id runs NATIVELY (libsodium, off the JS thread,
 // crypto/sodium `argon2id`) — well under a second on a phone. In pure JS on
 // Hermes (no JIT) it took on the order of MINUTES. The legacy v1/v2 PBKDF2
-// still runs in JS (@noble pbkdf2Async, which yields to the event loop so the
-// UI stays responsive) and takes tens of seconds; only old backups use it. The
+// runs natively too (crypto/sodium `pbkdf2Sha256`, off the JS thread, same
+// bytes as the @noble derivation that wrote those backups). The
 // v3 cost itself CANNOT be changed without a version bump: KDF parameters are
 // implied by `v`, not stored in the envelope, so changing them would break
 // decryption of every existing v3 backup.
@@ -300,11 +297,7 @@ export function ratePassphrase(pw: string): PassphraseStrength {
 
 function derivePbkdf2(passphrase: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
   const pwBytes = decodeUTF8(passphrase);
-  return pbkdf2Async(sha256, pwBytes, salt, {
-    c: iterations,
-    dkLen: BACKUP_KEY_BYTES,
-    asyncTick: KDF_ASYNC_TICK_MS,
-  });
+  return pbkdf2Sha256(pwBytes, salt, iterations, BACKUP_KEY_BYTES);
 }
 
 // Native libsodium Argon2id, off the JS thread (crypto/sodium `argon2id`): the

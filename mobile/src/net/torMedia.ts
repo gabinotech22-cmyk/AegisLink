@@ -15,7 +15,7 @@
  */
 import * as FileSystem from 'expo-file-system/legacy';
 import { sha256 } from '../crypto/sodium';
-import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import { mustUseTor } from './relayHttp';
 import { isTorAvailable, startTor, torHttpDownload } from './tor';
 

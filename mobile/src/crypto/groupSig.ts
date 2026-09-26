@@ -18,7 +18,7 @@
  */
 import { nacl, sha256 } from './sodium';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
-import { bytesToHex } from '@noble/hashes/utils';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { verifyDetached } from './ed25519';
 
 /**

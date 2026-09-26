@@ -1,6 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { logger } from '../utils/logger';
-import { nacl } from '../crypto/sodium';
+import { nacl, ml_kem768, sha256 } from '../crypto/sodium';
+import { secretB64Equals } from '../crypto/secretEquals';
 import { decodeBase64, encodeBase64, encodeUTF8 } from 'tweetnacl-util';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
@@ -42,7 +43,6 @@ import { useConnection } from '../store/connection';
 import { useMessages } from '../store/messages';
 import { useSecurityDiagnostics } from '../store/securityDiagnostics';
 import { performX3DH, performX3DHReceiver, generatePreKeys, shouldUsePqReceiver, type PreKeyBundle, type PqSignedPreKeyPublic } from '../crypto/signal/x3dh';
-import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { initRatchet, ratchetDecrypt, ratchetEncrypt, trimOldSkippedKeys, MAX_SKIPPED_KEYS, type RatchetState } from '../crypto/signal/ratchet';
 import { themedAlert } from '../components/AlertHost';
 import { nextOutboxDelayMs, isOutboxJobExpired } from '../db/outboxBackoff';
@@ -123,7 +123,6 @@ const spkSecretKey = (keyId: number) => `aegis.${getSlotPrefix()}spkSecret.${key
  * [RDIAG] instrumentation once the fresh-session desync is confirmed fixed.
  */
 function rootKeyFp(rk: Uint8Array): string {
-  const { sha256 } = require('@noble/hashes/sha256') as typeof import('@noble/hashes/sha256');
   const digest = sha256(rk);
   let hex = '';
   for (let i = 0; i < 4; i++) hex += digest[i].toString(16).padStart(2, '0');
@@ -882,7 +881,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
       try {
         await saveSpkSecret(nextSpkKeyId, newSecretB64);
         const back = await loadSpkSecret(nextSpkKeyId);
-        if (back === newSecretB64) return true;
+        if (secretB64Equals(back, newSecretB64)) return true;
       } catch (e) {
         if (__DEV__) logger.warn('[socket] SPK secret DB write attempt failed', attempt, e);
       }
@@ -909,7 +908,7 @@ async function uploadPreKeys(identity: Identity, deviceId: string) {
       try {
         await savePqSpkSecret(nextPqSpkKeyId, newPqSecretB64);
         const back = await loadPqSpkSecret(nextPqSpkKeyId);
-        if (back === newPqSecretB64) return true;
+        if (secretB64Equals(back, newPqSecretB64)) return true;
       } catch (e) {
         if (__DEV__) logger.warn('[socket] PQSPK secret DB write attempt failed', attempt, e);
       }

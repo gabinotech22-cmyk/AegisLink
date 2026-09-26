@@ -53,7 +53,7 @@ server policy**.
 | Purpose | Primitive | Library |
 |---|---|---|
 | DH key agreement | X25519 (`nacl.scalarMult` / `nacl.box`) | libsodium (native) |
-| Post-quantum KEM (hybrid handshake, v2) | ML-KEM-768 (FIPS 203) | `@noble/post-quantum` |
+| Post-quantum KEM (hybrid handshake v2, PQ ratchet) | ML-KEM-768 (FIPS 203) | libsodium (mobile) · `@noble/post-quantum` (desktop) |
 | Authenticated encryption (outer envelope) | `crypto_box` = X25519 + XSalsa20-Poly1305 (`nacl.box`) | libsodium (native) |
 | Authenticated encryption (message) | `crypto_secretbox` = XSalsa20-Poly1305 (`nacl.secretbox`) | libsodium (native) |
 | Signatures | Ed25519 (`nacl.sign`); verification via `verifyDetached`, which rejects non-canonical S (S ≥ L, RFC 8032 §5.1.7) before calling the primitive. TweetNaCl alone accepts the malleable (R, S + L) twin of a valid signature. That does not allow forgery, but the helper removes it anyway (`crypto/ed25519.ts` on mobile, desktop and relay; no direct `nacl.sign.detached.verify` is allowed, enforced by `ed25519.test.ts`). libsodium additionally rejects small-order public keys | libsodium (native) |
@@ -107,7 +107,7 @@ native libsodium everywhere:
   the JS arrays' own memory. Box/secretbox, X25519, Ed25519, HMAC-SHA256,
   HKDF-SHA256 (`crypto_kdf_hkdf_sha256`), constant-time comparison and the
   CSPRNG (`randombytes_buf`, which also backs the `getRandomValues` shim @noble
-  uses) run there; unkeyed SHA-2 stays in JS, as on desktop. There is no
+  uses) run there; single unkeyed SHA-2 hashes stay in JS, as on desktop. There is no
   JavaScript fallback: a binary without the module fails to start its crypto.
   The C core is diffed against TweetNaCl/@noble in CI, optimized and under
   ASan/UBSan (`modules/aegis-sodium/test/differential.mjs`).
@@ -118,17 +118,39 @@ native libsodium everywhere:
   Bytes are identical to the @noble derivation that wrote them, so no format
   changed; a v3 backup restore drops from minutes (JS on Hermes) to well under
   a second.
-- **Still in JavaScript:** ML-KEM-768 (`@noble/post-quantum`) everywhere; PBKDF2,
-  only to restore legacy v1/v2 backups; and Argon2id on desktop (V8 with JIT
-  runs it sub-second, and `sodium-native` exposes only the 16-byte-salt
-  `crypto_pwhash`).
+  The relay's **proof-of-work** (registration, blob uploads, mailbox
+  submissions) is mined there as well (`powSha256`, async, the C core's
+  `aegis_pow_sha256`): it tries the nonces `00000000`, `00000001`, … in the same
+  order as the JavaScript miner it replaced, so it returns the same nonce and
+  the relay's check is unchanged. The registration's difficulty 18 takes a
+  fraction of a second instead of seconds of JS on Hermes; the native miner
+  accepts difficulties 0–32 and challenges of 1–512 bytes.
+  **ML-KEM-768** (PQXDH prekeys and the PQ ratchet) runs there too, on
+  libsodium's `crypto_kem_mlkem768`, behind the facade's `ml_kem768` (same API
+  as `@noble/post-quantum`). It is byte-compatible with the @noble code that
+  wrote every stored key: same seed → same key pair and the same 2400-byte
+  expanded secret key, each side decapsulates the other's ciphertexts, same
+  implicit-rejection secret for a tampered ciphertext — so stored PQ prekeys and
+  hybrid ratchet states (`f1-golden`) keep working with no migration. Like
+  @noble, it throws on a public key that fails FIPS 203's encapsulation-key
+  check and on a secret key whose embedded H(ek) is wrong (the C core adds that
+  check; libsodium's `dec` alone does not).
+- **Still in JavaScript:** ML-KEM-768 on desktop (`@noble/post-quantum`):
+  `sodium-native` has no ML-KEM, and Electron's BoringSSL can generate
+  ML-KEM keys but cannot import a peer's public key, so it cannot encapsulate;
+  it moves with F-1b, when desktop keys leave the renderer. Also on desktop:
+  PBKDF2, only to restore legacy v1/v2 backups, and Argon2id (V8 with JIT runs
+  it sub-second, and `sodium-native` exposes only the 16-byte-salt
+  `crypto_pwhash`). On mobile, legacy PBKDF2-HMAC-SHA256 runs in the C core
+  too (`pbkdf2Sha256`, async), byte-identical to the @noble derivation that
+  wrote those backups; both clients use `@noble/hashes` 2.x (audit item H3).
 
 We state this per platform, with the manifests to check (`server/package.json`,
 `desktop/package.json`, `mobile/package.json`), because a blanket "constant-time
 native bindings" claim would be trivially falsifiable, and a falsifiable security
 claim is worse than an honest limitation. The rest of this section describes the
 JavaScript path the clients ran before F-1, and what still runs in JS
-(ML-KEM-768, legacy PBKDF2, desktop Argon2id, the protocol composition itself).
+(desktop ML-KEM-768, desktop legacy PBKDF2, desktop Argon2id, the protocol composition itself).
 
 **Constant-time posture (what is in our favor).**
 
@@ -193,14 +215,15 @@ held in JavaScript memory (mobile hands JS arrays to native code by pointer;
 desktop moves them over IPC to the main process of the same app — they never
 leave the device); keeping them only in native memory behind opaque handles is
 follow-up **F-1b**. Status: [`docs/ROADMAP.md`](ROADMAP.md) Hito 3.
-ML-KEM-768 stays on `@noble/post-quantum` and runs only on the clients (0.7.1 on
-mobile and desktop); the relay never encapsulates or decapsulates — it only
-checks the PQSPK signature — so its production image carries no PQ code. It
-stays a server `devDependency` only because the e2e test drives the real mobile
-client against the relay. The library moves on both clients together and must
-keep replaying `f1-golden`, whose hybrid ratchet sessions were persisted with
-0.6.1; 0.6.1 ↔ 0.7.1 was also checked for identical keygen and deterministic
-encapsulation, mutual decapsulation and implicit rejection.
+ML-KEM-768 runs only on the clients: native libsodium on mobile, and
+`@noble/post-quantum` 0.7.1 on desktop (see above); the relay never encapsulates
+or decapsulates — it only checks the PQSPK signature — so its production image
+carries no PQ code. On mobile `@noble/post-quantum` is now a `devDependency`, the
+oracle of the differential test (`modules/aegis-sodium/test/differential.mjs`,
+`sodium-facade.test.ts`). Both clients must keep replaying `f1-golden`, whose
+hybrid ratchet sessions were persisted with @noble 0.6.1; 0.6.1 ↔ 0.7.1 was also
+checked for identical keygen and deterministic encapsulation, mutual
+decapsulation and implicit rejection.
 
 ---
 
@@ -684,7 +707,14 @@ deleted together with the message row — delete for me, delete for everyone
 (receiver side), ephemeral expiry and a chat/contact wipe call
 `utils/mediaFiles.ts` on the URIs of the affected rows (main and multi-
 attachment). The decrypted cache is additionally purged 30 s after the app goes
-to background. Desktop keeps no attachment on disk.
+to background. Desktop keeps no attachment on disk: a message row stores the
+attachment's wire reference (`blob:` URI, encrypted at rest with the rest of the
+row), and the bubble downloads and decrypts it into a memory-only object URL
+when it renders (`hooks/useMediaUrl.ts`, bounded session cache). It reads every
+format mobile sends — `[image:<uri>]caption`, `[video:…]`, `[audio:Ns:…]`,
+`[file:<name>:…]`, `[multi:N]…` albums, blob URIs v1/v2/v3
+(`utils/incomingMedia.ts`, test `incomingMedia.test.ts`). With no local copy,
+an attachment older than the relay's 24 h TTL shows "attachment expired".
 
 ### 7.4b Local database at rest (SQLCipher) and the lost-key case
 
@@ -744,8 +774,8 @@ with a key derived from a user passphrase the relay never sees:
 > embedded, so they cannot be tuned without a version bump (changing them would
 > break decryption of existing v3 backups). On mobile the derivation runs on
 > native libsodium off the JS thread (§2.1), well under a second; in JavaScript
-> on Hermes it took minutes. Legacy v1/v2 (PBKDF2) restores still run in JS and
-> take tens of seconds.
+> on Hermes it took minutes. Legacy v1/v2 (PBKDF2) restores run natively on
+> mobile as well.
 
 **App-lock PIN (mobile, `mobile/src/lock/pin.ts`).** The PIN only gates the UI
 (no key derives from it). It is stored as `a4:` = Argon2id(PIN, 16-byte
@@ -837,7 +867,10 @@ on desktop, `lock/__tests__/coldLock.test.ts` on both).
   itself visible to the network observer.
 - **Call media IP on mobile.** WebRTC media is UDP and cannot ride Tor; with
   the default relay-only ICE (`hideCallIp`) the peer never sees the device IP,
-  but the TURN server does. Desktop forces TURN-over-TCP through Tor.
+  but the TURN server does. Desktop forces TURN-over-TCP through Tor. The TURN
+  credential carries no identity: its username is `<expiry>:<random 128 bits>`
+  (`server/src/routes/turn.ts`, test `turn.auth.test.ts`), so the TURN server
+  sees an IP but never the Aegis ID behind it.
 - **Endpoint compromise.** Malware or a physically compromised, unlocked device
   with the keystore unsealed can read plaintext. Panic-wipe and decoy modes
   mitigate coercion scenarios but are not cryptographic defenses.
@@ -849,8 +882,8 @@ on desktop, `lock/__tests__/coldLock.test.ts` on both).
   (§3.1).
 - **Runtime-level timing side-channels in the remaining JS crypto.** The NaCl,
   HMAC and HKDF primitives run on native libsodium on every platform (§2.1,
-  F-1), and so does Argon2id on mobile. What still runs in JavaScript —
-  ML-KEM-768, legacy PBKDF2 and desktop Argon2id — is constant-time at the
+  F-1), and so do ML-KEM-768, Argon2id and legacy PBKDF2 on mobile. What still
+  runs in JavaScript — on desktop, ML-KEM-768, legacy PBKDF2 and Argon2id — is constant-time at the
   source level only, not through the JIT and GC. Practical exploitation requires a local co-resident oracle, which
   already implies endpoint compromise. Key material still passes through the JS
   heap (follow-up F-1b, §10).

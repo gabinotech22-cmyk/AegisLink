@@ -9,11 +9,11 @@ import java.nio.ByteBuffer
 /**
  * F-1 B2: native libsodium for `src/crypto/sodium` (see ../../../../../../../index.ts).
  *
- * Every function but argon2id is synchronous (JSI) and writes into
+ * Every function but argon2id, pbkdf2Sha256 and powSha256 is synchronous (JSI) and writes into
  * caller-allocated output arrays, returning the C core's code: 0 ok,
  * 1 verification failed, -1 bad length, -2 libsodium failure. No key material
  * is copied into the JVM heap: buffers are direct views of the JS arrays.
- * argon2id is the exception (async; see below).
+ * Those three are the exceptions (async; see below).
  */
 internal object AegisSodiumNative {
   init {
@@ -38,6 +38,12 @@ internal object AegisSodiumNative {
   @JvmStatic external fun hmacsha256(out: ByteBuffer?, m: ByteBuffer?, k: ByteBuffer?): Int
   @JvmStatic external fun hkdfSha256(out: ByteBuffer?, ikm: ByteBuffer?, salt: ByteBuffer?, info: ByteBuffer?): Int
   @JvmStatic external fun argon2id(out: ByteBuffer?, pwd: ByteBuffer?, salt: ByteBuffer?, t: Int, m: Int): Int
+  @JvmStatic external fun powSha256(nonce: ByteBuffer?, challenge: ByteBuffer?, difficulty: Int): Int
+  @JvmStatic external fun pbkdf2Sha256(out: ByteBuffer?, pwd: ByteBuffer?, salt: ByteBuffer?, iterations: Int): Int
+  @JvmStatic external fun mlkem768Keypair(pk: ByteBuffer?, sk: ByteBuffer?): Int
+  @JvmStatic external fun mlkem768SeedKeypair(pk: ByteBuffer?, sk: ByteBuffer?, seed: ByteBuffer?): Int
+  @JvmStatic external fun mlkem768Enc(ct: ByteBuffer?, ss: ByteBuffer?, pk: ByteBuffer?): Int
+  @JvmStatic external fun mlkem768Dec(ss: ByteBuffer?, ct: ByteBuffer?, sk: ByteBuffer?): Int
 }
 
 /** A direct view of the JS array's memory, or null when it is empty (Hermes may give it no storage). */
@@ -76,6 +82,41 @@ private fun argon2id(pwd: ByteArray, salt: ByteArray, t: Int, mKib: Int, outLen:
     wipe(out)
     wipe(p)
   }
+}
+
+/**
+ * PBKDF2-HMAC-SHA256 for legacy backups: up to 600k iterations, so async like
+ * argon2id, with the same copy-and-zero handling of the password.
+ */
+private fun pbkdf2Sha256(pwd: ByteArray, salt: ByteArray, iterations: Int, outLen: Int): IntArray {
+  if (outLen <= 0 || outLen > 64) {
+    pwd.fill(0)
+    throw CodedException("ERR_AEGIS_PBKDF2", "aegis_pbkdf2_sha256: bad output length", null)
+  }
+  val out = ByteBuffer.allocateDirect(outLen)
+  val p = direct(pwd)
+  pwd.fill(0)
+  val s = direct(salt)
+  try {
+    val rc = AegisSodiumNative.pbkdf2Sha256(out, p, s, iterations)
+    if (rc != 0) throw CodedException("ERR_AEGIS_PBKDF2", "aegis_pbkdf2_sha256 failed: $rc", null)
+    return IntArray(outLen) { out.get(it).toInt() and 0xff }
+  } finally {
+    wipe(out)
+    wipe(p)
+  }
+}
+
+/**
+ * The registration proof-of-work: up to a few hundred thousand SHA-256 hashes,
+ * so it runs off the JS thread like argon2id. The challenge is public (it came
+ * from the relay); the nonce comes back as its 8 ASCII hex characters.
+ */
+private fun powSha256(challenge: ByteArray, difficulty: Int): String {
+  val nonce = ByteBuffer.allocateDirect(8)
+  val rc = AegisSodiumNative.powSha256(nonce, direct(challenge), difficulty)
+  if (rc != 0) throw CodedException("ERR_AEGIS_POW", "aegis_pow_sha256 failed: $rc", null)
+  return String(ByteArray(8) { nonce.get(it) }, Charsets.US_ASCII)
 }
 
 class AegisSodiumModule : Module() {
@@ -121,8 +162,22 @@ class AegisSodiumModule : Module() {
     Function("hkdfSha256") { out: Uint8Array, ikm: Uint8Array, salt: Uint8Array, info: Uint8Array ->
       AegisSodiumNative.hkdfSha256(b(out), b(ikm), b(salt), b(info))
     }
+    Function("mlkem768Keypair") { pk: Uint8Array, sk: Uint8Array -> AegisSodiumNative.mlkem768Keypair(b(pk), b(sk)) }
+    Function("mlkem768SeedKeypair") { pk: Uint8Array, sk: Uint8Array, seed: Uint8Array ->
+      AegisSodiumNative.mlkem768SeedKeypair(b(pk), b(sk), b(seed))
+    }
+    Function("mlkem768Enc") { ct: Uint8Array, ss: Uint8Array, pk: Uint8Array ->
+      AegisSodiumNative.mlkem768Enc(b(ct), b(ss), b(pk))
+    }
+    Function("mlkem768Dec") { ss: Uint8Array, ct: Uint8Array, sk: Uint8Array ->
+      AegisSodiumNative.mlkem768Dec(b(ss), b(ct), b(sk))
+    }
     AsyncFunction("argon2id") { pwd: ByteArray, salt: ByteArray, t: Int, mKib: Int, outLen: Int ->
       argon2id(pwd, salt, t, mKib, outLen)
     }
+    AsyncFunction("pbkdf2Sha256") { pwd: ByteArray, salt: ByteArray, iterations: Int, outLen: Int ->
+      pbkdf2Sha256(pwd, salt, iterations, outLen)
+    }
+    AsyncFunction("powSha256") { challenge: ByteArray, difficulty: Int -> powSha256(challenge, difficulty) }
   }
 }

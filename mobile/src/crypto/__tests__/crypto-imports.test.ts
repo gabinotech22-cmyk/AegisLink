@@ -7,10 +7,10 @@
  *
  * Allowed exceptions:
  *   - `tweetnacl-util` (base64/utf8 codecs, no key material).
- *   - `@noble/hashes/sha2|sha256` in `crypto/backup.ts`: PBKDF2 takes the hash
- *     object (legacy v1/v2 backups only).
- *   - @noble pbkdf2 / utils and @noble/post-quantum (not migrated in F-1).
- * Argon2id is native (the facade's `argon2id`): no @noble argon2 in production.
+ *   - `@noble/hashes/utils.js` (codecs such as utf8ToBytes / bytesToHex).
+ * Argon2id, PBKDF2 and ML-KEM-768 are native (the facade's `argon2id`,
+ * `pbkdf2Sha256` and `ml_kem768`): no @noble argon2, pbkdf2 or
+ * @noble/post-quantum in production.
  * Twin guards: `desktop/src/renderer/crypto/__tests__/crypto-imports.test.ts`,
  * `server/src/__tests__/crypto-imports.test.ts`.
  */
@@ -25,8 +25,8 @@ const TWEETNACL = /(?:from\s+'tweetnacl'|require\('tweetnacl'\))/;
 const NATIVE_MODULE = /(?:from\s+|require\()'[^']*modules\/aegis-sodium[^']*'/;
 const NOBLE_MAC_KDF = /from\s+'@noble\/hashes\/(?:hmac|hkdf)(?:\.js)?'/;
 const NOBLE_HASH = /from\s+'@noble\/hashes\/(?:sha2|sha256|sha512)(?:\.js)?'/;
-const NOBLE_HASH_ALLOWED = [path.join('crypto', 'backup.ts')];
-const NOBLE_ARGON2 = /(?:from\s+|require\()'@noble\/hashes\/argon2(?:\.js)?'/;
+const NOBLE_ARGON2 = /(?:from\s+|require\()'@noble\/hashes\/(?:argon2|pbkdf2)(?:\.js)?'/;
+const NOBLE_PQ = /(?:from\s+|require\(|import\()'@noble\/post-quantum[^']*'/;
 
 function productionFiles(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -66,18 +66,22 @@ describe('crypto primitives come only from src/crypto/sodium', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('no direct @noble SHA-2 import outside the facade (PBKDF2 in backup.ts excepted)', () => {
+  it('no direct @noble SHA-2 import outside the facade', () => {
     const offenders = files.filter(
       (p) =>
         !p.startsWith(FACADE_DIR) &&
-        !NOBLE_HASH_ALLOWED.some((a) => p.endsWith(path.sep + a)) &&
         NOBLE_HASH.test(fs.readFileSync(p, 'utf8')),
     );
     expect(offenders).toEqual([]);
   });
 
-  it('no @noble Argon2 anywhere in production code: the PIN and backup KDFs run natively', () => {
+  it('no @noble Argon2 or PBKDF2 anywhere in production code: the PIN and backup KDFs run natively', () => {
     const offenders = files.filter((p) => NOBLE_ARGON2.test(fs.readFileSync(p, 'utf8')));
+    expect(offenders).toEqual([]);
+  });
+
+  it('no @noble/post-quantum anywhere in production code: ML-KEM-768 runs natively', () => {
+    const offenders = files.filter((p) => NOBLE_PQ.test(fs.readFileSync(p, 'utf8')));
     expect(offenders).toEqual([]);
   });
 

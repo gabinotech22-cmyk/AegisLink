@@ -1,7 +1,7 @@
 /**
  * Cross-platform Known-Answer Test (KAT) for @noble/hashes.
  *
- * Audit-finding H3: desktop pins @noble/hashes v2.x while mobile pins v1.x.
+ * Audit-finding H3: desktop and mobile both pin @noble/hashes 2.x (mobile was on 1.x until 2026-09).
  * The algorithms (SHA-256, HMAC, HKDF, PBKDF2) are version-independent, but to
  * guarantee mobile↔desktop crypto parity (golden rule #5) this test asserts the
  * library produces the exact bytes of public RFC test vectors. The mobile suite

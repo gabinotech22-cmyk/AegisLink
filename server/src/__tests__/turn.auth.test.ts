@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 /**
  * turn.auth.test.ts — GET /turn/credentials must require a valid Ed25519
  * signature from a registered identity (A-7 of the 2026-06 audit).
@@ -58,8 +59,30 @@ describe('GET /turn/credentials — signature auth', () => {
     expect(typeof res.body.username).toBe('string');
     expect(typeof res.body.credential).toBe('string');
     expect(Array.isArray(res.body.urls)).toBe(true);
-    // The username binds the expiry + aegisId per coturn use-auth-secret.
-    expect(res.body.username).toContain(`:${AEGIS_ID}`);
+    // coturn use-auth-secret: "<expiry>:<anything>". The anything is random.
+    expect(res.body.username).toMatch(/^[0-9]+:[0-9a-f]{32}$/);
+  });
+
+  it('never puts the aegisId in the TURN username (coturn sees the caller IP)', async () => {
+    // Call media reaches coturn from the caller's real IP (UDP cannot use Tor).
+    // An aegisId in the username would give the TURN server identity + IP.
+    const get = async () => {
+      const ts = Date.now();
+      const sig = sign(AEGIS_ID, ts, signKeys.secretKey);
+      return request(app).get('/turn/credentials').query({ aegisId: AEGIS_ID, sig, ts });
+    };
+    const a = await get();
+    const b = await get();
+    expect(a.status).toBe(200);
+    expect(a.body.username).not.toContain(AEGIS_ID);
+    expect(a.body.credential).not.toContain(AEGIS_ID);
+    // Unlinkable: two credentials for the same identity share nothing but the expiry.
+    expect(a.body.username.split(':')[1]).not.toBe(b.body.username.split(':')[1]);
+    // Still a valid use-auth-secret credential for that username.
+    const expected = createHmac('sha1', process.env.TURN_SECRET as string)
+      .update(a.body.username)
+      .digest('base64');
+    expect(a.body.credential).toBe(expected);
   });
 
   it('advertises our OWN coturn as STUN (same host/port as TURN), never a third party', async () => {

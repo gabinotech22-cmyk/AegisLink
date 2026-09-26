@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -16,7 +16,7 @@
   html { background: var(--bg); }
   body { font-family: var(--sans); color: var(--text); line-height: 1.65; -webkit-font-smoothing: antialiased; }
   .wrap { max-width: 780px; margin: 0 auto; padding: 48px 22px 80px; }
-  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 40px; }
   header a { color: var(--text); text-decoration: none; font-weight: 600; font-size: 20px; display: flex; align-items: center; gap: 12px; }
   h1 { font-size: 34px; line-height: 1.15; margin-bottom: 10px; }
   .meta { font-family: var(--mono); font-size: 13px; color: var(--accent); margin-bottom: 36px; }
@@ -34,7 +34,18 @@
   th { color: var(--text); background: var(--bg-2); }
   .note { font-style: italic; margin-top: 42px; color: var(--dim); font-size: 14.5px; }
   footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--dim); }
+  .lang-switch { display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; flex-shrink: 0; }
+  .lang-switch button { background: transparent; border: none; color: var(--dim); font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; padding: 7px 10px; cursor: pointer; }
+  .lang-switch button:hover { color: var(--text); }
+  .lang-switch button.active { background: rgba(91,242,185,0.14); color: var(--accent); }
+  /* lang.js sets html[data-lang]; without JS the English copy shows. */
+  html[data-lang="en"] [data-l]:not([data-l="en"]),
+  html[data-lang="es"] [data-l]:not([data-l="es"]),
+  html[data-lang="it"] [data-l]:not([data-l="it"]) { display: none !important; }
 </style>
+<script type="application/json" id="i18n-meta">{"en":{"title":"Terms of Service — AegisLink","desc":"AegisLink Terms of Service: what the service provides, acceptable use, and your responsibilities as the sole holder of your keys."},
+ "es":{"title":"Términos del servicio — AegisLink","desc":"Términos del servicio de AegisLink: qué ofrece el servicio, el uso aceptable y tus responsabilidades como único titular de tus claves."},
+ "it":{"title":"Termini di servizio — AegisLink","desc":"Termini di servizio di AegisLink: cosa offre il servizio, uso accettabile e le tue responsabilità come unico detentore delle tue chiavi."}}</script>
 </head>
 <body>
 <div class="wrap">
@@ -43,8 +54,97 @@
       <svg width="34" height="34" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 2 L35 10 L35 30 L20 38 L5 30 L5 10 Z" fill="none" stroke="#5bf2b9" stroke-width="2.4" stroke-linejoin="round"/><rect x="13" y="15" width="14" height="3.2" rx="0.4" fill="#5bf2b9"/><rect x="13" y="21.8" width="14" height="3.2" rx="0.4" fill="#5bf2b9" opacity="0.55"/></svg>
       AegisLink
     </a>
+    <div class="lang-switch" role="group" aria-label="Language">
+      <button type="button" data-lang="es" lang="es">ES</button>
+      <button type="button" data-lang="en" lang="en">EN</button>
+      <button type="button" data-lang="it" lang="it">IT</button>
+    </div>
   </header>
 
+  <main data-l="es">
+  <h1>Términos del servicio de AegisLink</h1>
+  <p class="meta">Fecha de entrada en vigor: 2026-05-21 &middot; Última actualización: 2026-07-17</p>
+  <p class="note">Traducción de cortesía. En caso de discrepancia, prevalece la versión en inglés.</p>
+  <p>Lee atentamente estos Términos del servicio ("Términos") antes de usar AegisLink. Al instalar o usar la aplicación, aceptas quedar vinculado por ellos.</p>
+  <h2>1. Descripción del servicio</h2>
+  <p>AegisLink es una aplicación de mensajería cifrada de extremo a extremo. Ofrece:</p>
+  <ul>
+    <li>Creación de cuentas anónima, sin ningún identificador personal</li>
+    <li>Mensajería cifrada individual y en grupo mediante el protocolo Double Ratchet</li>
+    <li>Llamadas de voz y vídeo cifradas sobre WebRTC (DTLS-SRTP)</li>
+    <li>Mensajes efímeros con temporizadores de borrado configurables por el usuario</li>
+    <li>Archivos adjuntos cifrados</li>
+    <li>Un nivel empresarial opcional ("AegisLink Work") con funciones para organizaciones</li>
+  </ul>
+  <p>AegisLink opera un servidor relay que reenvía mensajes cifrados entre clientes. El relay nunca tiene acceso al contenido de los mensajes en texto plano. El relay es una capa de transporte, no un encargado del tratamiento de datos.</p>
+  <h2>2. Requisitos</h2>
+  <p>Debes tener al menos 13 años para usar AegisLink. Si tienes entre 13 y 18 años (o la mayoría de edad de tu jurisdicción), necesitas el consentimiento de tus padres o tutores. Al usar la app, declaras que cumples estos requisitos.</p>
+  <h2>3. Cuenta y claves</h2>
+  <p>Tu identidad de AegisLink consiste en un par de claves criptográficas generado en tu dispositivo. <strong>Eres el único responsable de mantener el acceso a tu dispositivo y a cualquier frase de contraseña de copia de seguridad que crees.</strong> No podemos recuperar tu cuenta, tus mensajes ni tu identidad si pierdes tus claves. No hay restablecimiento de contraseña, ni recuperación de cuenta por correo electrónico, ni ninguna vía de soporte para recuperar el acceso a una identidad perdida.</p>
+  <p>Puedes eliminar tu cuenta en cualquier momento desde la aplicación. La eliminación es permanente e irreversible.</p>
+  <h2>4. Uso aceptable</h2>
+  <p>Te comprometes a no usar AegisLink para:</p>
+  <ul>
+    <li>Distribuir, solicitar o almacenar material de abuso sexual infantil (CSAM) o cualquier contenido que explote sexualmente a menores — esta es una política de tolerancia cero y se denunciará a las autoridades competentes en la medida en que sea técnicamente posible dada la arquitectura de AegisLink</li>
+    <li>Transmitir malware, ransomware o cualquier software diseñado para dañar sistemas u obtener acceso no autorizado a ellos</li>
+    <li>Organizar, coordinar o llevar a cabo actos de violencia, terrorismo o cualquier actividad que amenace la seguridad física de cualquier persona</li>
+    <li>Infringir la normativa aplicable de control de exportaciones (incluidas las Export Administration Regulations de EE. UU. y la normativa de la UE sobre productos de doble uso) en relación con el software criptográfico</li>
+    <li>Eludir, aplicar ingeniería inversa o intentar comprometer la infraestructura del servidor relay, las sesiones cifradas de otros usuarios o los mecanismos de seguridad de la aplicación</li>
+    <li>Suplantar a AegisLink, a sus operadores o a otros usuarios de forma que engañe o defraude</li>
+  </ul>
+  <p>El cifrado de extremo a extremo de AegisLink implica que no podemos supervisar de forma proactiva el contenido de los mensajes. Confiamos en que los usuarios denuncien los abusos mediante el mecanismo de denuncia de la app o escribiendo a <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a>. Tomaremos las medidas adecuadas dentro de los límites de lo técnicamente posible.</p>
+  <h2>5. Servicio de relay — Sin garantía de entrega</h2>
+  <p>El relay de AegisLink se presta <strong>según el principio de mejor esfuerzo (best effort)</strong>. No garantizamos:</p>
+  <ul>
+    <li>La entrega de mensajes dentro de ningún plazo de tiempo concreto</li>
+    <li>La disponibilidad continua o ininterrumpida del servidor relay</li>
+    <li>La entrega de mensajes si el relay sufre caídas, migraciones o ataques de denegación de servicio</li>
+  </ul>
+  <p>Los mensajes no entregados se conservan un máximo de 30 días y después se eliminan de forma permanente. Las comunicaciones críticas no deberían depender únicamente de AegisLink.</p>
+  <h2>6. Cifrado — Sin garantía de seguridad</h2>
+  <p>Aunque AegisLink usa criptografía de última generación y publica su código fuente para que pueda auditarse, <strong>ningún sistema es demostrablemente irrompible</strong>. No garantizamos que el cifrado no pueda ser roto por un adversario con recursos suficientes, que no se descubran vulnerabilidades en las bibliotecas subyacentes ni que tu propio dispositivo esté libre de compromisos. La seguridad es una responsabilidad compartida: debes mantener actualizados tu dispositivo y tu sistema operativo.</p>
+  <h2>7. Exclusión de garantías</h2>
+  <p>EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY APLICABLE, AEGISLINK SE PROPORCIONA "TAL CUAL" Y "SEGÚN DISPONIBILIDAD", SIN GARANTÍAS DE NINGÚN TIPO, EXPRESAS O IMPLÍCITAS, INCLUIDAS, ENTRE OTRAS, LAS GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD PARA UN FIN DETERMINADO, NO INFRACCIÓN O FUNCIONAMIENTO ININTERRUMPIDO.</p>
+  <h2>8. Limitación de responsabilidad</h2>
+  <p>EN LA MÁXIMA MEDIDA PERMITIDA POR LA LEY APLICABLE, EN NINGÚN CASO EL PROYECTO AEGISLINK, SUS COLABORADORES O SUS OPERADORES SERÁN RESPONSABLES DE NINGÚN DAÑO INDIRECTO, INCIDENTAL, ESPECIAL, EJEMPLAR, CONSECUENTE O PUNITIVO, INCLUIDA LA PÉRDIDA DE DATOS, LA PÉRDIDA DE COMUNICACIONES O LA PÉRDIDA DE PRIVACIDAD, QUE SE DERIVE DE TU USO O DE TU IMPOSIBILIDAD DE USAR AEGISLINK, O QUE ESTÉ RELACIONADO CON ELLOS, INCLUSO SI SE LES HUBIERA ADVERTIDO DE LA POSIBILIDAD DE DICHOS DAÑOS.</p>
+  <p>LA RESPONSABILIDAD TOTAL FRENTE A TI POR TODAS LAS RECLAMACIONES DERIVADAS DE ESTOS TÉRMINOS NO SUPERARÁ EL IMPORTE QUE HAYAS PAGADO POR AEGISLINK EN LOS DOCE MESES ANTERIORES A LA RECLAMACIÓN (SI LO HUBIERA). SI NO HAS REALIZADO NINGÚN PAGO, NUESTRA RESPONSABILIDAD TOTAL ES CERO.</p>
+  <p>Nada de lo dispuesto en estos Términos limita la responsabilidad que no pueda excluirse conforme a la legislación imperativa aplicable (incluidas las leyes de protección de los consumidores de tu jurisdicción).</p>
+  <h2>9. AegisLink Work — Términos para empresas</h2>
+  <p>AegisLink Work es un nivel empresarial opcional que ofrece funciones para organizaciones, como la administración gestionada del espacio de trabajo, controles de acceso basados en roles y herramientas de auditoría con fines de cumplimiento normativo.</p>
+  <p><strong>Términos adicionales para AegisLink Work:</strong></p>
+  <ul>
+    <li>Las suscripciones empresariales se rigen por un Formulario de Pedido y un Contrato Empresarial independientes. En caso de conflicto, prevalece el Contrato Empresarial.</li>
+    <li>Los administradores de AegisLink Work de una organización pueden gestionar los miembros y el acceso dentro del espacio de trabajo de esa organización. No pueden descifrar el contenido de los mensajes; la arquitectura E2EE no cambia.</li>
+    <li>Las suscripciones se facturan de acuerdo con el Formulario de Pedido aplicable. Los reembolsos están sujetos a las condiciones del Formulario de Pedido.</li>
+    <li>AegisLink Work no altera las prácticas de tratamiento de datos descritas en la Política de privacidad. Ningún contenido de los mensajes pasa a ser accesible para AegisLink como consecuencia de usar las funciones de Work.</li>
+  </ul>
+  <h2>10. Propiedad intelectual</h2>
+  <p>El código fuente de la aplicación AegisLink se publica bajo una licencia de código abierto (consulta el repositorio para conocer los términos concretos de la licencia). El nombre y el logotipo de AegisLink son marcas del proyecto AegisLink. No puedes usarlos de forma que sugiera un respaldo o una afiliación oficial sin permiso por escrito.</p>
+  <h2>11. Cambios en estos Términos</h2>
+  <p>Publicaremos en el repositorio los cambios sustanciales de estos Términos y actualizaremos la fecha de entrada en vigor indicada arriba. El uso continuado de AegisLink después de la fecha de entrada en vigor de los Términos actualizados constituye su aceptación. Si no estás de acuerdo con los Términos actualizados, deberías dejar de usar la aplicación y eliminar tu cuenta.</p>
+  <h2>12. Terminación</h2>
+  <p>Nos reservamos el derecho de suspender el acceso al relay de las cuentas que infrinjan el §4 (Uso aceptable), en la medida en que podamos identificarlas técnicamente. Como AegisLink no registra las IP de los usuarios ni los metadatos de las comunicaciones, el alcance de estas medidas es limitado. No cancelaremos cuentas en función del contenido de mensajes cifrados que no podemos leer.</p>
+  <h2>13. Legislación aplicable y resolución de disputas</h2>
+  <p class="note">[Marcador de posición de la legislación aplicable — se actualizará antes del lanzamiento público con la jurisdicción en la que esté legalmente constituido el proyecto AegisLink.]</p>
+  <p>Cualquier disputa derivada de estos Términos o relacionada con ellos se resolverá mediante arbitraje vinculante de acuerdo con las normas de [organismo de arbitraje], salvo que cualquiera de las partes podrá solicitar medidas cautelares ante un tribunal competente en asuntos de propiedad intelectual o de seguridad.</p>
+  <p>Nada de lo dispuesto en esta cláusula te impide presentar una reclamación ante una autoridad de control si te encuentras en el Espacio Económico Europeo o en una jurisdicción con derechos de protección de datos equivalentes.</p>
+  <h2>14. Disposiciones varias</h2>
+  <ul>
+    <li><strong>Acuerdo íntegro:</strong> Estos Términos, junto con la Política de privacidad y cualquier Formulario de Pedido aplicable, constituyen el acuerdo íntegro entre tú y AegisLink en relación con el servicio.</li>
+    <li><strong>Divisibilidad:</strong> Si alguna disposición se considera inaplicable, las demás disposiciones seguirán plenamente vigentes.</li>
+    <li><strong>No renuncia:</strong> No hacer valer una disposición no supone renunciar a nuestro derecho a hacerla valer en el futuro.</li>
+    <li><strong>Cesión:</strong> No puedes ceder tus derechos en virtud de estos Términos. Nosotros podemos ceder los nuestros en el marco de una fusión o adquisición, siempre que no se reduzcan tus derechos de privacidad conforme a la Política de privacidad.</li>
+  </ul>
+  <h2>15. Contacto</h2>
+  <p>Notificaciones legales y preguntas relacionadas con los Términos:</p>
+  <ul>
+    <li>Correo: <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a></li>
+    <li>GitHub: <a href="https://github.com/gabinotech22-cmyk/AegisLink">https://github.com/gabinotech22-cmyk/AegisLink</a></li>
+  </ul>
+  <p class="note">Una versión en español de estos términos está disponible bajo petición. Envía un correo a <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a> con el asunto "Terms of Service — Español".</p>
+  </main>
+
+  <main data-l="en">
   <h1>AegisLink Terms of Service</h1>
   <p class="meta">Effective date: 2026-05-21 &middot; Last updated: 2026-07-17</p>
   <p>Please read these Terms of Service ("Terms") carefully before using AegisLink. By installing or using the application, you agree to be bound by them.</p>
@@ -124,8 +224,97 @@
     <li>GitHub: <a href="https://github.com/gabinotech22-cmyk/AegisLink">https://github.com/gabinotech22-cmyk/AegisLink</a></li>
   </ul>
   <p class="note">Una versión en español de estos términos está disponible bajo petición. Envíe un correo a <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a> con el asunto "Terms of Service — Español".</p>
+  </main>
 
-  <footer>&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacy</a> &middot; <a href="/terms.html">Terms</a> &middot; <a href="/donate.html">Support</a> &middot; <a href="/legal.html">Legal requests</a></footer>
+  <main data-l="it">
+  <h1>Termini di servizio di AegisLink</h1>
+  <p class="meta">Data di entrata in vigore: 2026-05-21 &middot; Ultimo aggiornamento: 2026-07-17</p>
+  <p class="note">Traduzione di cortesia. In caso di discrepanza prevale la versione inglese.</p>
+  <p>Leggi attentamente questi Termini di servizio ("Termini") prima di usare AegisLink. Installando o usando l'applicazione, accetti di esserne vincolato.</p>
+  <h2>1. Descrizione del servizio</h2>
+  <p>AegisLink è un'applicazione di messaggistica cifrata end-to-end. Offre:</p>
+  <ul>
+    <li>Creazione anonima dell'account, senza alcun identificatore personale</li>
+    <li>Messaggistica cifrata individuale e di gruppo tramite il protocollo Double Ratchet</li>
+    <li>Chiamate vocali e video cifrate su WebRTC (DTLS-SRTP)</li>
+    <li>Messaggi effimeri con timer di eliminazione configurabili dall'utente</li>
+    <li>Allegati cifrati</li>
+    <li>Un livello enterprise facoltativo ("AegisLink Work") con funzioni per le organizzazioni</li>
+  </ul>
+  <p>AegisLink gestisce un server relay che inoltra i messaggi cifrati tra i client. Il relay non ha mai accesso al contenuto in chiaro dei messaggi. Il relay è uno strato di trasporto, non un responsabile del trattamento dei dati.</p>
+  <h2>2. Requisiti</h2>
+  <p>Devi avere almeno 13 anni per usare AegisLink. Se hai tra i 13 e i 18 anni (o l'età della maggiore età nella tua giurisdizione), devi avere il consenso di un genitore o tutore. Usando l'app, dichiari di soddisfare questi requisiti.</p>
+  <h2>3. Account e chiavi</h2>
+  <p>La tua identità AegisLink consiste in una coppia di chiavi crittografiche generata sul tuo dispositivo. <strong>Sei l'unico responsabile del mantenimento dell'accesso al tuo dispositivo e a qualsiasi passphrase di backup che crei.</strong> Non possiamo recuperare il tuo account, i tuoi messaggi o la tua identità se perdi le tue chiavi. Non c'è reimpostazione della password, né recupero dell'account via email, né alcun canale di assistenza per riottenere l'accesso a un'identità persa.</p>
+  <p>Puoi eliminare il tuo account in qualsiasi momento dall'applicazione. L'eliminazione è permanente e irreversibile.</p>
+  <h2>4. Uso accettabile</h2>
+  <p>Ti impegni a non usare AegisLink per:</p>
+  <ul>
+    <li>Distribuire, sollecitare o conservare materiale di abuso sessuale su minori (CSAM) o qualsiasi contenuto che sfrutti sessualmente minori — questa è una politica di tolleranza zero e verrà segnalato alle autorità competenti nella misura in cui sia tecnicamente possibile data l'architettura di AegisLink</li>
+    <li>Trasmettere malware, ransomware o qualsiasi software progettato per danneggiare sistemi o ottenervi accesso non autorizzato</li>
+    <li>Organizzare, coordinare o compiere atti di violenza, terrorismo o qualsiasi attività che minacci l'incolumità fisica di qualsiasi persona</li>
+    <li>Violare le leggi applicabili sul controllo delle esportazioni (comprese le Export Administration Regulations statunitensi e la normativa UE sui beni a duplice uso) in relazione al software crittografico</li>
+    <li>Aggirare, sottoporre a reverse engineering o tentare di compromettere l'infrastruttura del server relay, le sessioni cifrate di altri utenti o i meccanismi di sicurezza dell'applicazione</li>
+    <li>Impersonare AegisLink, i suoi operatori o altri utenti in modo da ingannare o frodare</li>
+  </ul>
+  <p>La cifratura end-to-end di AegisLink implica che non possiamo monitorare in modo proattivo il contenuto dei messaggi. Contiamo sugli utenti per segnalare gli abusi tramite il meccanismo di segnalazione nell'app o scrivendo a <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a>. Adotteremo le misure appropriate nei limiti di ciò che è tecnicamente possibile.</p>
+  <h2>5. Servizio di relay — Nessuna garanzia di consegna</h2>
+  <p>Il relay di AegisLink è fornito secondo il principio del <strong>massimo impegno (best effort)</strong>. Non garantiamo:</p>
+  <ul>
+    <li>La consegna dei messaggi entro un determinato intervallo di tempo</li>
+    <li>La disponibilità continua o ininterrotta del server relay</li>
+    <li>La consegna dei messaggi se il relay subisce interruzioni, migrazioni o attacchi denial-of-service</li>
+  </ul>
+  <p>I messaggi non consegnati vengono conservati per un massimo di 30 giorni e poi eliminati definitivamente. Le comunicazioni critiche non dovrebbero basarsi esclusivamente su AegisLink.</p>
+  <h2>6. Cifratura — Nessuna garanzia di sicurezza</h2>
+  <p>Sebbene AegisLink utilizzi crittografia allo stato dell'arte e pubblichi il proprio codice sorgente perché possa essere verificato, <strong>nessun sistema è dimostrabilmente inviolabile</strong>. Non garantiamo che la cifratura non possa essere violata da un avversario con risorse sufficienti, che non vengano scoperte vulnerabilità nelle librerie sottostanti né che il tuo dispositivo stesso sia privo di compromissioni. La sicurezza è una responsabilità condivisa: devi mantenere aggiornati il tuo dispositivo e il sistema operativo.</p>
+  <h2>7. Esclusione di garanzie</h2>
+  <p>NELLA MISURA MASSIMA CONSENTITA DALLA LEGGE APPLICABILE, AEGISLINK È FORNITO "COSÌ COM'È" E "COME DISPONIBILE", SENZA GARANZIE DI ALCUN TIPO, ESPRESSE O IMPLICITE, INCLUSE, A TITOLO ESEMPLIFICATIVO MA NON ESAUSTIVO, LE GARANZIE DI COMMERCIABILITÀ, IDONEITÀ PER UNO SCOPO PARTICOLARE, NON VIOLAZIONE O FUNZIONAMENTO ININTERROTTO.</p>
+  <h2>8. Limitazione di responsabilità</h2>
+  <p>NELLA MISURA MASSIMA CONSENTITA DALLA LEGGE APPLICABILE, IN NESSUN CASO IL PROGETTO AEGISLINK, I SUOI CONTRIBUTORI O I SUOI OPERATORI SARANNO RESPONSABILI PER DANNI INDIRETTI, INCIDENTALI, SPECIALI, ESEMPLARI, CONSEQUENZIALI O PUNITIVI, INCLUSA LA PERDITA DI DATI, LA PERDITA DI COMUNICAZIONI O LA PERDITA DI PRIVACY, DERIVANTI DA O IN CONNESSIONE CON IL TUO USO O L'IMPOSSIBILITÀ DI USARE AEGISLINK, ANCHE SE AVVISATI DELLA POSSIBILITÀ DI TALI DANNI.</p>
+  <p>LA RESPONSABILITÀ TOTALE NEI TUOI CONFRONTI PER TUTTE LE PRETESE DERIVANTI DA QUESTI TERMINI NON SUPERERÀ L'IMPORTO CHE HAI PAGATO PER AEGISLINK NEI DODICI MESI PRECEDENTI LA PRETESA (SE PRESENTE). SE NON HAI EFFETTUATO ALCUN PAGAMENTO, LA NOSTRA RESPONSABILITÀ TOTALE È PARI A ZERO.</p>
+  <p>Nulla in questi Termini limita la responsabilità che non può essere esclusa ai sensi della legge imperativa applicabile (comprese le norme a tutela dei consumatori della tua giurisdizione).</p>
+  <h2>9. AegisLink Work — Termini enterprise</h2>
+  <p>AegisLink Work è un livello enterprise facoltativo che offre funzioni per le organizzazioni, tra cui l'amministrazione gestita dello spazio di lavoro, controlli di accesso basati sui ruoli e strumenti di audit a fini di conformità.</p>
+  <p><strong>Termini aggiuntivi per AegisLink Work:</strong></p>
+  <ul>
+    <li>Gli abbonamenti enterprise sono regolati da un Modulo d'Ordine e da un Contratto Enterprise separati. In caso di conflitto, prevale il Contratto Enterprise.</li>
+    <li>Gli amministratori AegisLink Work di un'organizzazione possono gestire i membri e gli accessi all'interno dello spazio di lavoro di quell'organizzazione. Non possono decifrare il contenuto dei messaggi; l'architettura E2EE resta invariata.</li>
+    <li>Gli abbonamenti vengono fatturati in conformità al Modulo d'Ordine applicabile. I rimborsi sono soggetti alle condizioni del Modulo d'Ordine.</li>
+    <li>AegisLink Work non modifica le pratiche sui dati descritte nell'Informativa sulla privacy. Nessun contenuto dei messaggi diventa accessibile ad AegisLink a seguito dell'uso delle funzioni Work.</li>
+  </ul>
+  <h2>10. Proprietà intellettuale</h2>
+  <p>Il codice sorgente dell'applicazione AegisLink è rilasciato con una licenza open source (consulta il repository per i termini specifici della licenza). Il nome e il logo AegisLink sono marchi del progetto AegisLink. Non puoi usarli in modo da suggerire un'approvazione o un'affiliazione ufficiale senza autorizzazione scritta.</p>
+  <h2>11. Modifiche a questi Termini</h2>
+  <p>Pubblicheremo nel repository le modifiche sostanziali a questi Termini e aggiorneremo la data di entrata in vigore indicata sopra. L'uso continuato di AegisLink dopo la data di entrata in vigore dei Termini aggiornati costituisce accettazione degli stessi. Se non accetti i Termini aggiornati, dovresti smettere di usare l'applicazione ed eliminare il tuo account.</p>
+  <h2>12. Cessazione</h2>
+  <p>Ci riserviamo il diritto di sospendere l'accesso al relay agli account che violano il §4 (Uso accettabile), nella misura in cui siamo tecnicamente in grado di identificarli. Poiché AegisLink non registra gli IP degli utenti né i metadati delle comunicazioni, tali azioni hanno una portata limitata. Non chiuderemo account sulla base del contenuto di messaggi cifrati che non possiamo leggere.</p>
+  <h2>13. Legge applicabile e risoluzione delle controversie</h2>
+  <p class="note">[Segnaposto per la legge applicabile — da aggiornare prima del lancio pubblico con la giurisdizione in cui il progetto AegisLink è legalmente costituito.]</p>
+  <p>Qualsiasi controversia derivante da o relativa a questi Termini sarà risolta mediante arbitrato vincolante secondo il regolamento di [organismo arbitrale], fermo restando che ciascuna parte può chiedere provvedimenti inibitori a un tribunale competente per questioni di proprietà intellettuale o di sicurezza.</p>
+  <p>Nulla in questa clausola ti impedisce di presentare un reclamo a un'autorità di controllo se ti trovi nello Spazio economico europeo o in una giurisdizione con diritti equivalenti in materia di protezione dei dati.</p>
+  <h2>14. Disposizioni varie</h2>
+  <ul>
+    <li><strong>Intero accordo:</strong> questi Termini, insieme all'Informativa sulla privacy e a qualsiasi Modulo d'Ordine applicabile, costituiscono l'intero accordo tra te e AegisLink relativo al servizio.</li>
+    <li><strong>Separabilità:</strong> se una disposizione viene ritenuta inapplicabile, le restanti disposizioni restano pienamente in vigore.</li>
+    <li><strong>Nessuna rinuncia:</strong> il mancato esercizio di una disposizione non costituisce rinuncia al nostro diritto di farla valere in futuro.</li>
+    <li><strong>Cessione:</strong> non puoi cedere i tuoi diritti ai sensi di questi Termini. Noi possiamo cedere i nostri nell'ambito di una fusione o acquisizione, a condizione che i tuoi diritti di privacy ai sensi dell'Informativa sulla privacy non vengano ridotti.</li>
+  </ul>
+  <h2>15. Contatti</h2>
+  <p>Comunicazioni legali e domande relative ai Termini:</p>
+  <ul>
+    <li>Email: <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a></li>
+    <li>GitHub: <a href="https://github.com/gabinotech22-cmyk/AegisLink">https://github.com/gabinotech22-cmyk/AegisLink</a></li>
+  </ul>
+  <p class="note">Una versione in spagnolo di questi termini è disponibile su richiesta. Invia un'email ad <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a> con oggetto "Terms of Service — Español".</p>
+  </main>
+
+  <footer>
+    <span data-l="en">&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacy</a> &middot; <a href="/terms.html">Terms</a> &middot; <a href="/donate.html">Support</a> &middot; <a href="/legal.html">Legal requests</a></span>
+    <span data-l="es">&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacidad</a> &middot; <a href="/terms.html">Términos</a> &middot; <a href="/donate.html">Apoyar</a> &middot; <a href="/legal.html">Solicitudes legales</a></span>
+    <span data-l="it">&copy; AegisLink &middot; <a href="/">aegis-link.it</a> &middot; <a href="/privacy.html">Privacy</a> &middot; <a href="/terms.html">Termini</a> &middot; <a href="/donate.html">Sostieni</a> &middot; <a href="/legal.html">Richieste legali</a></span>
+  </footer>
 </div>
+<script src="/lang.js"></script>
 </body>
 </html>

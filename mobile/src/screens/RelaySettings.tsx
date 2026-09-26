@@ -8,9 +8,13 @@
  * itself is `net/relayMigration.ts` (register on the new relay → announce to
  * contacts → switch → reconnect, with a 7-day grace window on the old one).
  * Reachable only with the FEDERATION flag on (App.tsx / Privacy.tsx gate).
+ *
+ * The "how do I run one?" card is the in-app entry to docs/SELF-HOSTING.md:
+ * three steps inline plus a link to the rendered guide on the product site
+ * (web/selfhost.html), so a user who has never seen the repo can set one up.
  */
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, TextInput, Pressable, ScrollView, Modal, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, Pressable, ScrollView, Modal, ActivityIndicator, Linking } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../theme/ThemeContext';
@@ -19,8 +23,21 @@ import { TopBar } from '../components/TopBar';
 import { PrimaryButton } from '../components/Button';
 import { useIdentity } from '../store/identity';
 import { useLockConfirm } from '../components/LockConfirm';
+import { RelayQrScanner } from '../components/RelayQrScanner';
 import { relayRefFromOnion, shortOnion, type RelayRef } from '../net/relayRef';
 import { describeHome, migrateHomeRelay, verifyRelay, type RelayInfo, type MigrateError, type VerifyRelayResult } from '../net/relayMigration';
+
+// Public self-hosting guide on the product site (web/selfhost.html, the
+// rendered twin of docs/SELF-HOSTING.md). Opened in the external browser, like
+// the legal links in Privacy.tsx — the app itself fetches nothing. The page
+// is trilingual (web/lang.js); `?lang=` opens it in the app's language.
+export const SELFHOST_GUIDE_URL = 'https://aegis-link.it/selfhost.html';
+const GUIDE_LANGS = ['es', 'en', 'it'];
+
+export function selfhostGuideUrl(language?: string): string {
+  const l = (language ?? '').slice(0, 2).toLowerCase();
+  return GUIDE_LANGS.includes(l) ? `${SELFHOST_GUIDE_URL}?lang=${l}` : SELFHOST_GUIDE_URL;
+}
 
 interface Props {
   onBack: () => void;
@@ -59,12 +76,15 @@ export function RelaySettingsScreen({ onBack }: Props) {
   const [onionInput, setOnionInput] = useState('');
   const [verify, setVerify] = useState<VerifyState>({ kind: 'idle' });
   const [migrate, setMigrate] = useState<MigrateState>({ kind: 'idle' });
+  const [scanOpen, setScanOpen] = useState(false);
 
   const typedRef = useMemo(() => relayRefFromOnion(onionInput), [onionInput]);
   const verifiedRef = verify.kind === 'ok' && typedRef && typedRef.onion === verify.ref.onion ? verify.ref : null;
 
-  const handleVerify = useCallback(async () => {
-    const ref = relayRefFromOnion(onionInput);
+  // `raw` comes from the QR scanner (verify right away, no typing); the
+  // button verifies what is in the field.
+  const handleVerify = useCallback(async (raw?: string) => {
+    const ref = relayRefFromOnion(raw ?? onionInput);
     if (!ref) { setVerify({ kind: 'error', error: 'invalid_onion' }); return; }
     setVerify({ kind: 'verifying' });
     const r = await verifyRelay(ref);
@@ -140,6 +160,27 @@ export function RelaySettingsScreen({ onBack }: Props) {
         <Text style={{ fontFamily: t.font, fontSize: 13, color: t.textDim, lineHeight: 19, marginBottom: 12 }}>
           {i18nT('relaySettings.ownDesc')}
         </Text>
+        <View style={{ backgroundColor: t.surface2, borderRadius: t.radiusS, padding: 12, marginBottom: 12 }} testID="relay-howto">
+          <Text style={{ fontFamily: t.font, fontSize: 13, color: t.text, fontWeight: '600', marginBottom: 8 }}>
+            {i18nT('relaySettings.howToTitle')}
+          </Text>
+          {(['howTo1', 'howTo2', 'howTo3'] as const).map((k, idx) => (
+            <View key={k} style={{ flexDirection: 'row', gap: 8, marginBottom: 6 }}>
+              <Text style={{ fontFamily: t.fontMono, fontSize: 12, color: t.accent, lineHeight: 18 }}>{idx + 1}.</Text>
+              <Text style={{ fontFamily: t.font, fontSize: 12, color: t.textDim, lineHeight: 18, flex: 1 }}>{i18nT(`relaySettings.${k}`)}</Text>
+            </View>
+          ))}
+          <Pressable
+            onPress={() => { void Linking.openURL(selfhostGuideUrl(i18n.language)).catch(() => {}); }}
+            accessibilityRole="link"
+            accessibilityHint={i18nT('relaySettings.guideHint')}
+            testID="relay-guide-link"
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 6 }}
+          >
+            <Text style={{ fontFamily: t.font, fontSize: 13, color: t.accent, fontWeight: '600' }}>{i18nT('relaySettings.guideCta')}</Text>
+            <I.Chevron size={14} color={t.accent} />
+          </Pressable>
+        </View>
         <View style={{ backgroundColor: t.surface, borderWidth: 1, borderColor: t.border, borderRadius: t.radius, paddingHorizontal: 14 }}>
           <TextInput
             value={onionInput}
@@ -155,7 +196,16 @@ export function RelaySettingsScreen({ onBack }: Props) {
             style={{ fontFamily: t.fontMono, fontSize: 13, color: t.text, paddingVertical: 14 }}
           />
         </View>
-        <View style={{ height: 10 }} />
+        <Pressable
+          onPress={() => setScanOpen(true)}
+          disabled={verify.kind === 'verifying' || migrate.kind === 'running'}
+          testID="relay-scan-qr"
+          accessibilityRole="button"
+          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12 }}
+        >
+          <I.QR size={18} color={t.accent} />
+          <Text style={{ fontFamily: t.font, fontSize: 14, color: t.accent, fontWeight: '600' }}>{i18nT('relaySettings.scanCta')}</Text>
+        </Pressable>
         <PrimaryButton
           t={t}
           label={verify.kind === 'verifying' ? i18nT('relaySettings.verifying') : i18nT('relaySettings.verify')}
@@ -245,6 +295,15 @@ export function RelaySettingsScreen({ onBack }: Props) {
           </View>
         </View>
       </Modal>
+      <RelayQrScanner
+        visible={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onOnion={(onion) => {
+          setScanOpen(false);
+          setOnionInput(onion);
+          void handleVerify(onion);
+        }}
+      />
       {lockConfirmElement}
     </View>
   );
