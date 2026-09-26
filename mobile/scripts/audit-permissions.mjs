@@ -31,7 +31,7 @@ const ANDROID_ALLOWED = {
   'android.permission.RECEIVE_BOOT_COMPLETED': 'restart the call-wake service after reboot',
   'android.permission.FOREGROUND_SERVICE': 'in-call + call-wake foreground services',
   'android.permission.FOREGROUND_SERVICE_MICROPHONE': 'in-call foreground service type (Android 14+)',
-  'android.permission.FOREGROUND_SERVICE_DATA_SYNC': 'call-wake foreground service type (Android 14+)',
+  'android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING': 'call-wake foreground service type (Android 14+)',
   'android.permission.SYSTEM_ALERT_WINDOW': 'full-screen incoming-call UI over the lock screen',
   'android.permission.USE_BIOMETRIC': 'app lock (expo-local-authentication)',
   'android.permission.USE_FINGERPRINT': 'app lock on API < 28 (expo-local-authentication)',

@@ -115,7 +115,7 @@
         "android.permission.BLUETOOTH",
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MICROPHONE",
-        "android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+        "android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING"
       ],
       "blockedPermissions": [
         "android.permission.ACTIVITY_RECOGNITION"

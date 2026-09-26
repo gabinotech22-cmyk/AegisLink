@@ -116,6 +116,12 @@ These cannot be automated and must be done by the team before the first submissi
       - Download JSON key → this is `google-service-account.json`
 - [ ] Add Privacy Policy URL (same URL as iOS — required before publishing)
 - [ ] Complete Data safety questionnaire (all "No" responses given AegisLink's zero-collection architecture)
+- [ ] Declare the foreground service types (App content → Foreground service permissions):
+      `microphone` (in-call service) and `remoteMessaging` (call-wake service that keeps the
+      encrypted relay socket open so calls and messages arrive with the app closed, without
+      Google). Play asks for a short video of the feature. The wake service moved from
+      `dataSync` to `remoteMessaging` in 1.0.7 (`mobile/plugins/withCallWakeService.js`):
+      Android 15 banned `dataSync` at boot and capped it at 6 h a day.
 - [ ] Upload to internal track first via `eas submit --platform android --profile production`
 - [ ] Promote to production after internal testing
 

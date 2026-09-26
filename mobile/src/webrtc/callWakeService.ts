@@ -4,7 +4,7 @@
  * docs/FASE4-CALL-WAKE-DESIGN.md: to ring an incoming call with the app killed
  * WITHOUT Google/FCM, Android needs the app process kept resident by a
  * foreground service (iOS is forced onto VoIP/APNs and does not use this). This
- * wraps the native AegisWakeService (HeadlessJsTaskService, type=dataSync):
+ * wraps the native AegisWakeService (HeadlessJsTaskService, type=remoteMessaging):
  * `startCallWakeService` posts the persistent notification and starts the
  * headless "AegisCallWake" task; `stopCallWakeService` tears it down.
  *
