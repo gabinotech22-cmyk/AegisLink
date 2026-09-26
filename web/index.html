@@ -1116,7 +1116,7 @@
             </svg>
           </div>
           <h4 data-i18n="s1_title">Generas tu llave</h4>
-          <p data-i18n="s1_body">La app crea una keypair Curve25519 (TweetNaCl) en tu dispositivo. La clave privada nunca abandona el teléfono. Obtienes un Aegis-ID anónimo.</p>
+          <p data-i18n="s1_body">La app crea una keypair Curve25519 (libsodium) en tu dispositivo. La clave privada nunca abandona el teléfono. Obtienes un Aegis-ID anónimo.</p>
         </div>
         <div class="step reveal tilt">
           <span class="step-num">02</span>
@@ -1590,7 +1590,7 @@
         jr_msg: "Nos vemos a las 21:00 en el sitio de siempre.",
         demo: {
           replies: [
-            "Eso se acaba de cifrar en tu navegador con TweetNaCl — la misma librería que usa la app.",
+            "Eso se acaba de cifrar en tu navegador con TweetNaCl — el mismo cifrado NaCl que la app ejecuta con libsodium.",
             "El relay solo vio los bytes de arriba. Ni tu texto, ni tu nombre, ni tu IP.",
             "Cada mensaje lleva un nonce nuevo: el mismo texto nunca produce los mismos bytes."
           ],
@@ -1642,7 +1642,7 @@
         how_eyebrow: "How it works",
         how_title: "Three steps.<br/>Then you simply <em style='font-style:italic; color: var(--accent);'>talk</em>.",
         s1_title: "Generate your key",
-        s1_body: "The app creates a Curve25519 keypair (TweetNaCl) on your device. The private key never leaves the phone. You get an anonymous Aegis-ID.",
+        s1_body: "The app creates a Curve25519 keypair (libsodium) on your device. The private key never leaves the phone. You get an anonymous Aegis-ID.",
         s2_title: "Verify contacts",
         s2_body: "Scan your contact's QR or compare your key fingerprints. The human handshake protects against any man in the middle.",
         s3_title: "Talk freely",
@@ -1764,7 +1764,7 @@
         jr_msg: "See you at 9 pm at the usual place.",
         demo: {
           replies: [
-            "That was just encrypted in your browser with TweetNaCl — the same library the app uses.",
+            "That was just encrypted in your browser with TweetNaCl — the same NaCl cipher the app runs with libsodium.",
             "The relay only saw the bytes above. Not your text, not your name, not your IP.",
             "Every message carries a fresh nonce: the same text never produces the same bytes."
           ],
@@ -1819,7 +1819,7 @@
         how_eyebrow: "Come funziona",
         how_title: "Tre passi.<br/>Poi, semplicemente <em style='font-style:italic; color: var(--accent);'>parli</em>.",
         s1_title: "Generi la tua chiave",
-        s1_body: "L'app crea una keypair Curve25519 (TweetNaCl) sul tuo dispositivo. La chiave privata non lascia mai il telefono. Ottieni un Aegis-ID anonimo.",
+        s1_body: "L'app crea una keypair Curve25519 (libsodium) sul tuo dispositivo. La chiave privata non lascia mai il telefono. Ottieni un Aegis-ID anonimo.",
         s2_title: "Verifichi i contatti",
         s2_body: "Scansioni il QR del tuo contatto o confrontate le impronte delle vostre chiavi. La stretta di mano umana protegge da qualsiasi intermediario.",
         s3_title: "Parli tranquillo",
@@ -1941,7 +1941,7 @@
         jr_msg: "Ci vediamo alle 21:00 nel solito posto.",
         demo: {
           replies: [
-            "Questo è stato appena cifrato nel tuo browser con TweetNaCl — la stessa libreria dell'app.",
+            "Questo è stato appena cifrato nel tuo browser con TweetNaCl — la stessa cifratura NaCl che l'app esegue con libsodium.",
             "Il relay ha visto solo i byte qui sopra. Né il tuo testo, né il tuo nome, né il tuo IP.",
             "Ogni messaggio porta un nonce nuovo: lo stesso testo non produce mai gli stessi byte."
           ],

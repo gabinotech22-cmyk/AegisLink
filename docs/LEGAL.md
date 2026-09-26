@@ -42,4 +42,4 @@ Being honest about the residue matters more than a clean marketing claim:
 
 Every claim on this page is checkable in the source code: the relay (`server/`), the metadata-stripping and padding layer (`mobile/src/crypto/metadata.ts`), and the protocol document ([PROTOCOL.md](PROTOCOL.md)). If you find a discrepancy between this page and the code, that is a security issue — please report it via [SECURITY.md](../SECURITY.md).
 
-*Contact for legal process: gabinotech22@gmail.com*
+*Contact for legal process: aegislink.report@gmail.com*
