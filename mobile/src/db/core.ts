@@ -971,6 +971,12 @@ export async function wipeDatabase(): Promise<void> {
   // Identity secret keys (mirrors what clearIdentity does in SecureStore),
   // after a cryptographic erase of the profile's vault KEK (F-1b).
   await vault.destroyProfile(slot).catch(() => {});
+  // UnifiedPush (Android): unregister from the distributor and forget it, so
+  // no endpoint of this install keeps receiving wakes (plugins/withUnifiedPush.js).
+  try {
+    const { disableUnifiedPush } = require('../notifications/unifiedPush') as typeof import('../notifications/unifiedPush');
+    await disableUnifiedPush();
+  } catch { /* module absent (iOS / Expo Go) */ }
   await SecureStore.deleteItemAsync(getSecretKeySlot()).catch(() => {});
   await SecureStore.deleteItemAsync(getSignSecretKeySlot()).catch(() => {});
 

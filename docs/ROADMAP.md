@@ -278,8 +278,13 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
       lever (no refactor cosmético — decisión M4).
 - [ ] **F-2 — UnifiedPush**: transporte wake-up sin Google/Apple (ntfy/Gotify), FCM/APNs como fallback.
       Parcial: el build Android `foss` ya no lleva FCM (`plugins/withFossPush.js`, `config.ts`
-      `REMOTE_PUSH_ENABLED`) y despierta por ntfy sobre Tor + servicio en primer plano. Falta el
-      conector UnifiedPush (distribuidor externo) y en iOS no hay alternativa a APNs.
+      `REMOTE_PUSH_ENABLED`) y despierta por ntfy sobre Tor + servicio en primer plano.
+      **Conector UnifiedPush (2b.3c) ✅ en código, pendiente de validar en dispositivo:** con una
+      distribuidora instalada (ntfy, Sunup…) y activada en Privacidad, la app se despierta cerrada
+      sin Google en las dos variantes Android (`plugins/withUnifiedPush.js`,
+      `src/notifications/unifiedPush.ts`; un registro por buzón, así que el endpoint rota con la época
+      y no se comparte entre perfiles). Pruebas: `unifiedPush.test.ts`, `withUnifiedPush.test.ts`.
+      En iOS no hay alternativa a APNs.
 - [x] **Badge del icono = no leídos reales** — 1.0.7: el contador del icono se recalcula en cada
       cambio de contadores (`notifications/push.ts` `syncAppBadge`: al leer un chat, al recibir, al
       cargar, al volver a primer plano, al cambiar el ajuste); antes solo se incrementaba al llegar

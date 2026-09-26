@@ -280,8 +280,10 @@ Lo que cambia:
   `infra/tor/torrc`), publish flag-gated en `server/src/push/ntfy.ts` +
   `relay/handler.ts` (`envelope:mb` offline → `notifyMailbox(M)`), tests
   `server/src/__tests__/ntfyMailboxPush.relay.test.ts` +
-  `ntfy.unit.test.ts`. **Pendiente:** suscripción del cliente móvil al topic
-  (2b.2) — sin esto el wake-up se publica pero nadie escucha todavía.
+  `ntfy.unit.test.ts`. 2b.2 (suscripción móvil al topic sobre Tor), 2b.3a/b
+  (ntfy clearnet + binding de endpoint en el relay) y 2b.3c (conector UnifiedPush
+  en Android, `mobile/plugins/withUnifiedPush.js` + `src/notifications/unifiedPush.ts`)
+  también hechos; estado por sub-slice en `docs/FASE4-SLICE2B-PUSH-DESIGN.md` §9.
   Histórico del spike inicial debajo.
   Primitivo aislado en `mobile/src/crypto/mailbox.ts` (+10 tests, off the live
   path, estilo Fase 0): derivación **determinista por época** del mailbox desde un
@@ -293,8 +295,8 @@ Lo que cambia:
   multi-firma) y paridad desktop+server — todo implementado en las Slices 1–6 y
   testeado (`server/src/__tests__/mailboxAuth.relay.test.ts` 8/8, mobile
   `mailboxSocket` 7/7, known-answer vector cross-plataforma en `mailbox.test.ts`).
-  Único resto: la suscripción móvil al wake-up de mailbox (Slice 2b.2+, Fase
-  5) — el publish del relay ya está implementado (2b.0/2b.1, ver arriba). Era
+  La suscripción móvil al wake-up de mailbox (Slice 2b.2+) y el conector
+  UnifiedPush (2b.3c) también están hechos (ver arriba). Era
   el cambio de plumbing más profundo y fue después de estabilizar ocultar
   `from` (✅).
 - **Fase 5 — anti-correlación + push.** Cover traffic / jitter; notifier

@@ -22,6 +22,11 @@ import './src/notifications/dailySummaryTask';
 import { registerCallWakeTask } from './src/webrtc/callWakeTask';
 registerCallWakeTask();
 
+// Same for the UnifiedPush wake (Android, Slice 2b.3c): AegisMailboxWakeService
+// runs "AegisMailboxWake" headless when the user's distributor wakes us.
+import { registerMailboxWakeTask } from './src/notifications/unifiedPush';
+registerMailboxWakeTask();
+
 import { registerRootComponent } from 'expo';
 import App from './App';
 

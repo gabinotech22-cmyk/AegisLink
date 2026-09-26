@@ -44,6 +44,7 @@ import {
   setLastMailboxConnectEpoch,
 } from '../crypto/mailboxStore';
 import { mailboxAuthProof, epochFor, MAILBOX_EPOCH_MS, type Mailbox } from '../crypto/mailbox';
+import { bindUnifiedPushEndpoint } from '../notifications/unifiedPush';
 import { TorSioSocket, isTorAvailable, startTor, onTorStatus, torHttpRequest, type TorStatus } from '../net/tor';
 
 /**
@@ -365,6 +366,10 @@ export async function connectMailboxSocket(
     // (stable token can re-link epochs at the relay) is documented in
     // FASE4-SLICE2B-PUSH-DESIGN.md §7.3 — this NEVER runs with the flag off.
     registerIosWakeBinding(sock, mb.mailboxIdB64);
+    // Slice 2b.3c (Android): bind the UnifiedPush endpoint of THIS mailbox —
+    // one registration per mailbox, so the endpoint rotates with the epoch and
+    // differs per profile (R1). No-op unless the user picked a distributor.
+    void bindUnifiedPushEndpoint(sock, mb.mailboxIdB64);
     if (__DEV__) logger.debug('[mailbox] authenticated');
   });
 
@@ -447,7 +452,7 @@ async function rotateForNewEpoch(): Promise<void> {
 }
 
 /** Tear down the mailbox socket (e.g. on logout / profile switch / panic). */
-/** Retract the iOS wake-token binding of the current mailbox (profile switch). */
+/** Retract the wake bindings (iOS token, UnifiedPush endpoint) of the current mailbox (profile switch). */
 export async function retractMailboxWakeToken(): Promise<void> {
   if (!mboxSocket || !authed || !currentEpochMailbox) return;
   const sock = mboxSocket;
@@ -455,6 +460,10 @@ export async function retractMailboxWakeToken(): Promise<void> {
   if (!mailboxId) return;
   await new Promise<void>((resolve) => {
     sock.emit('mailbox:push:token', { mailboxId, expoToken: null }, () => resolve());
+    setTimeout(resolve, 2000);
+  });  // And the UnifiedPush endpoint (Android): only the active profile is woken.
+  await new Promise<void>((resolve) => {
+    sock.emit('mailbox:push:endpoint', { mailboxId, endpoint: null }, () => resolve());
     setTimeout(resolve, 2000);
   });
 }
@@ -477,6 +486,15 @@ export function disconnectMailboxSocket(): void {
 }
 
 /** Our current-epoch mailbox id (base64), or null if the socket isn't up. Test/debug aid. */
+/**
+ * Bind the UnifiedPush endpoint now, on the live authenticated mailbox socket
+ * (the user just picked a distributor). Otherwise it binds at the next auth.
+ */
+export function rebindUnifiedPush(): void {
+  if (!mboxSocket || !authed || !currentEpochMailbox) return;
+  void bindUnifiedPushEndpoint(mboxSocket, currentEpochMailbox.mailboxIdB64);
+}
+
 export function ownCurrentMailboxId(): string | null {
   return currentEpochMailbox?.mailboxIdB64 ?? null;
 }

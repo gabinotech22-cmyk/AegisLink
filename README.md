@@ -83,8 +83,10 @@ This protection has limits, and we list them ourselves in
   never contains content or sender identity. On iOS the relay sends it straight
   to Apple (APNs); there is no Expo or other intermediary in the chain. Android
   does not register with Google's FCM: it wakes through the relay's ntfy over
-  Tor plus a foreground service (the `foss` build contains no Google code at
-  all).
+  Tor plus a foreground service, and — if you install a UnifiedPush
+  distributor such as ntfy and turn it on in Privacy — through that
+  distributor even with the app closed (the `foss` build contains no Google
+  code at all).
 - **No over-the-air code updates**: the app never downloads new code outside
   the stores, so it never contacts Expo's update server and no one can push code
   to phones without store review. Every change ships as a store build.
@@ -148,7 +150,8 @@ short version:
   is Apple's APNs: the relay sends a generic wake-up with no content or sender,
   but Apple learns that *a* device received *a* push. There is no alternative to
   APNs on iOS. Android uses no Google push service: wake-ups come from the
-  relay's ntfy over Tor plus a foreground service.
+  relay's ntfy over Tor, a foreground service, or your UnifiedPush distributor
+  (whose server sees when wake-ups arrive, never who writes or what).
 - **Calls on mobile expose your IP to our TURN server.** Call media is UDP,
   which Tor cannot carry. By default, 1:1 calls relay all media through our
   TURN server (*Hide IP in calls*), so the other person does not see your IP,
