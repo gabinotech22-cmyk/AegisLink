@@ -15,6 +15,7 @@
 
 import { relayFetch, type RelayResponse } from '../net/relayHttp';
 import { nacl, powSha256, POW_DIFFICULTY_MAX } from './sodium';
+import { vault } from './sodium/vault';
 import { secretB64Equals } from './secretEquals';
 import { logger } from '../utils/logger';
 import * as SecureStore from 'expo-secure-store';
@@ -282,7 +283,7 @@ export async function uploadIdentityAndPrekeys(
   const ts = Date.now();
   const timeBucket = Math.floor(ts / 30_000);
   const sig = encodeBase64(
-    nacl.sign.detached(utf8ToBytes(`${identity.aegisId}:prekeys:${timeBucket}`), identity.signingSecretKey),
+    vault.sign(identity.signingSecretKey, utf8ToBytes(`${identity.aegisId}:prekeys:${timeBucket}`)),
   );
 
   const prekeysBody: PreKeysPostBody = {

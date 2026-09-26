@@ -40,6 +40,7 @@ import {
   type ChannelPostInner,
   type DelegationCertData,
 } from '../publicChannelKey';
+import { vk } from './helpers/rawIdentity';
 
 // ── Server-generated vectors (fixed seeds) ──────────────────────────────────
 const V = {
@@ -153,7 +154,7 @@ describe('publicChannelKey — server parity (known-answer vectors)', () => {
   });
 
   test('signPost + computePostHash match server bytes', () => {
-    expect(encodeBase64(signPost(V.channelId, makePost(), senderKp.secretKey))).toBe(V.postSig);
+    expect(encodeBase64(signPost(V.channelId, makePost(), vk(senderKp.secretKey)))).toBe(V.postSig);
     expect(encodeBase64(computePostHash(V.channelId, makePost(), decodeBase64(V.postSig)))).toBe(V.postHash);
   });
 
@@ -216,7 +217,7 @@ describe('publicChannelKey — internal round-trips', () => {
 
   test('seal → open round-trips locally', () => {
     const post = makePost();
-    const sealed = sealChannelPost(V.channelId, post, senderKp.secretKey, cek);
+    const sealed = sealChannelPost(V.channelId, post, vk(senderKp.secretKey), cek);
     const opened = openChannelPost(
       V.channelId,
       sealed.ciphertextB64,
@@ -231,7 +232,7 @@ describe('publicChannelKey — internal round-trips', () => {
 
   test('verifyChainLink links post N to post N-1', () => {
     const post0 = makePost();
-    const sig0 = signPost(V.channelId, post0, senderKp.secretKey);
+    const sig0 = signPost(V.channelId, post0, vk(senderKp.secretKey));
     const hash0 = computePostHash(V.channelId, post0, sig0);
     expect(verifyChainLink(V.channelId, post0, sig0, hash0)).toBe(true);
     expect(verifyChainLink(V.channelId, post0, sig0, new Uint8Array(32))).toBe(false);
@@ -248,7 +249,7 @@ describe('publicChannelKey — internal round-trips', () => {
     };
     const certSig = signDelegation(cert, channelKp.secretKey);
     const post = makePost();
-    const postSig = signPost(V.channelId, post, delegatee.secretKey);
+    const postSig = signPost(V.channelId, post, vk(delegatee.secretKey));
 
     expect(verifyDelegatedPost(V.channelId, post, postSig, cert, certSig, channelKp.publicKey, new Set())).toBe(true);
     expect(verifyDelegatedPost(V.channelId, post, postSig, cert, certSig, channelKp.publicKey, new Set([5]))).toBe(false);

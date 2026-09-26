@@ -103,7 +103,7 @@ jest.mock('../../store/contacts', () => ({
 
 // ── store/identity ───────────────────────────────────────────────────────────
 jest.mock('../../store/identity', () => ({
-  useIdentity: { getState: () => ({ identity: { aegisId: 'self-aegis-id', secretKey: new Uint8Array(32), signingSecretKey: new Uint8Array(64) } }) },
+  useIdentity: { getState: () => ({ identity: { aegisId: 'self-aegis-id', secretKey: require('../../crypto/__tests__/helpers/rawIdentity').testBoxKey(), signingSecretKey: require('../../crypto/__tests__/helpers/rawIdentity').testSignKey() } }) },
 }));
 
 // ── store/messages ───────────────────────────────────────────────────────────

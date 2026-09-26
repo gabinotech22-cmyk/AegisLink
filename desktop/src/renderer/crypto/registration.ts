@@ -10,6 +10,7 @@
  */
 
 import { nacl, sha256 } from './sodium';
+import { vault } from './sodium/vault';
 import { encodeBase64 } from 'tweetnacl-util';
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 import type {
@@ -184,10 +185,7 @@ export async function uploadIdentityAndPrekeys(
   const ts = Date.now();
   const timeBucket = Math.floor(ts / 30_000);
   const sig = encodeBase64(
-    nacl.sign.detached(
-      utf8ToBytes(`${identity.aegisId}:prekeys:${timeBucket}`),
-      identity.signingSecretKey,
-    ),
+    vault.sign(identity.signingSecretKey, utf8ToBytes(`${identity.aegisId}:prekeys:${timeBucket}`)),
   );
 
   const prekeysBody: PreKeysPostBody = {

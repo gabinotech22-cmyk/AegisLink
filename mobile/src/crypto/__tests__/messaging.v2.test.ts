@@ -19,9 +19,8 @@ import { decodeBase64 } from 'tweetnacl-util';
 
 const NOW = 1_750_000_000_000;
 
-function signingPub(identity: { signingSecretKey: Uint8Array }): Uint8Array {
-  // nacl.sign secret key is 64 bytes: last 32 are the public key.
-  return identity.signingSecretKey.slice(32, 64);
+function signingPub(identity: { signingPublicKey: Uint8Array }): Uint8Array {
+  return identity.signingPublicKey;
 }
 
 function setupSession() {

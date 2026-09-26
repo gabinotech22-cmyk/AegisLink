@@ -1,6 +1,7 @@
 import { logger } from '../utils/logger';
 import { create } from 'zustand';
 import { createIdentity, identityFromStored, type Identity } from '../crypto/identity';
+import { vault } from '../crypto/sodium/vault';
 import {
   loadIdentity,
   saveIdentity,
@@ -8,11 +9,24 @@ import {
   closeActiveDatabase,
   deleteIdentitySlot,
   purgeLockAndDuressSecrets,
+  type StoredIdentity,
 } from '../db/local';
 import { fetchPowChallenge, solvePoW, uploadIdentityAndPrekeys } from '../crypto/registration';
 import { generatePreKeys } from '../crypto/signal/x3dh';
 import { homeRelayBaseUrl, hydrateHomeRelay, resetHomeRelay } from '../net/homeRelay';
 import '../crypto/ipc-types';
+
+/** What saveIdentity persists for an identity: public halves + its keys as vault blobs (F-1b). */
+function storedFrom(identity: Identity): StoredIdentity {
+  return {
+    aegisId: identity.aegisId,
+    publicKeyB64: identity.publicKeyB64,
+    secretKeyStored: identity.secretKeyStored,
+    signingPublicKeyB64: identity.signingPublicKeyB64,
+    signingSecretKeyStored: identity.signingSecretKeyStored,
+    createdAt: identity.createdAt,
+  };
+}
 
 const secureStorage = () => window.aegis.secureStorage;
 const DEV = Boolean(import.meta.env?.DEV);
@@ -252,16 +266,15 @@ export const useIdentity = create<IdentityState>((set, get) => ({
     try {
       const { usePreferences } = await import('./preferences');
       if (usePreferences.getState().duressActive) {
+        // Throwaway vault keys (never persisted) behind a mock public identity.
+        await vault.unlock('self');
         const decoyIdentity: Identity = {
+          ...createIdentity('self'),
           aegisId: 'AEGIS-MOCK',
           publicKey: new Uint8Array(32),
-          secretKey: new Uint8Array(32),
           publicKeyB64: 'mockPublicKeyB64String',
-          secretKeyB64: 'mockSecretKeyB64String',
           signingPublicKey: new Uint8Array(32),
-          signingSecretKey: new Uint8Array(64),
           signingPublicKeyB64: 'mockSigningPublicKeyB64String',
-          signingSecretKeyB64: 'mockSigningSecretKeyB64String',
           createdAt: Date.now(),
         };
         set({
@@ -297,7 +310,14 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         set({ identity: null, activeSlotId, slotsList, status: 'idle', hydrated: true, publishStatus: 'unknown', publishError: null });
         return;
       }
-      const identity = identityFromStored(stored);
+      // The profile's KEK goes from safeStorage (main process) into the vault;
+      // the identity keys load as handles. Keys stored before F-1b are imported
+      // once here and re-persisted as vault blobs (the raw copies are replaced).
+      await vault.unlock(activeSlotId);
+      const identity = identityFromStored(stored, activeSlotId);
+      if (identity.secretKeyStored !== stored.secretKeyStored || identity.signingSecretKeyStored !== stored.signingSecretKeyStored) {
+        await saveIdentity(storedFrom(identity));
+      }
 
       const displayName = (await secureStorage().get(getPrefKey('aegis.displayName', activeSlotId))) || identity.aegisId.toLowerCase().replace(/-/g, '');
       const avatarColor = (await secureStorage().get(getPrefKey('aegis.avatarColor', activeSlotId))) || '#05b875';
@@ -346,17 +366,11 @@ export const useIdentity = create<IdentityState>((set, get) => ({
   async generate() {
     set({ status: 'generating', error: null });
     try {
-      const identity = createIdentity();
-      await saveIdentity({
-        aegisId: identity.aegisId,
-        publicKeyB64: identity.publicKeyB64,
-        secretKeyB64: identity.secretKeyB64,
-        signingPublicKeyB64: identity.signingPublicKeyB64,
-        signingSecretKeyB64: identity.signingSecretKeyB64,
-        createdAt: identity.createdAt,
-      });
-
       const activeSlotId = get().activeSlotId || 'self';
+      await vault.unlock(activeSlotId);
+      const identity = createIdentity(activeSlotId);
+      await saveIdentity(storedFrom(identity));
+
       const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
       const defaultColor = '#05b875';
 
@@ -391,14 +405,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
   async linkDevice(identity: Identity) {
     set({ status: 'generating', error: null });
     try {
-      await saveIdentity({
-        aegisId: identity.aegisId,
-        publicKeyB64: identity.publicKeyB64,
-        secretKeyB64: identity.secretKeyB64,
-        signingPublicKeyB64: identity.signingPublicKeyB64,
-        signingSecretKeyB64: identity.signingSecretKeyB64,
-        createdAt: identity.createdAt,
-      });
+      await saveIdentity(storedFrom(identity));
 
       // No publishToServer because mobile already registered this identity.
       const activeSlotId = get().activeSlotId || 'self';
@@ -499,18 +506,12 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       while (slotsList.includes(`slot_${nextSlotNum}`)) nextSlotNum++;
       const newSlotId = `slot_${nextSlotNum}`;
 
-      const identity = createIdentity();
+      await vault.unlock(newSlotId);
+      const identity = createIdentity(newSlotId);
       const prevSlot = get().activeSlotId;
       setActiveDbSlot(newSlotId);
 
-      await saveIdentity({
-        aegisId: identity.aegisId,
-        publicKeyB64: identity.publicKeyB64,
-        secretKeyB64: identity.secretKeyB64,
-        signingPublicKeyB64: identity.signingPublicKeyB64,
-        signingSecretKeyB64: identity.signingSecretKeyB64,
-        createdAt: identity.createdAt,
-      });
+      await saveIdentity(storedFrom(identity));
 
       const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
       const defaultColor = '#05b875';

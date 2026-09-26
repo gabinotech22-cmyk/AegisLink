@@ -68,12 +68,13 @@ vi.mock('../../socket/client', () => ({
 }));
 
 vi.mock('../../crypto/identity', () => ({
+  moveIdentity: (identity: unknown) => identity,
   createIdentity: () => ({
     aegisId: 'NEW-PROF-0001',
     publicKeyB64: 'npk',
-    secretKeyB64: 'nsk',
+    secretKeyStored: 'nsk',
     signingPublicKeyB64: 'nspk',
-    signingSecretKeyB64: 'nssk',
+    signingSecretKeyStored: 'nssk',
     createdAt: 1700000001000,
   }),
 }));

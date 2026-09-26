@@ -74,9 +74,9 @@ describe('saveIdentity — Keychain accessibility (iOS off-device backup leak re
     await saveIdentity({
       aegisId: 'AEGIS-TEST',
       publicKeyB64: 'pub-b64',
-      secretKeyB64: 'secret-b64',
+      secretKeyStored: 'vault1:secret-blob',
       signingPublicKeyB64: 'sign-pub-b64',
-      signingSecretKeyB64: 'sign-secret-b64',
+      signingSecretKeyStored: 'vault1:sign-secret-blob',
       createdAt: Date.now(),
     });
 

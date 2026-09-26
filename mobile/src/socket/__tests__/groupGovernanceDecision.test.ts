@@ -11,6 +11,7 @@ import { encodeBase64 } from 'tweetnacl-util';
 import { signGroupGovernance, type GroupPermissions } from '../../crypto/groupSig';
 import { DEFAULT_PERMISSIONS } from '../../crypto/groupRoles';
 import { decideGovernanceUpdate, type ClaimedGovernance } from '../groupMetadataDecision';
+import { vk } from '../../crypto/__tests__/helpers/rawIdentity';
 
 const ownerKeys = nacl.sign.keyPair();
 const ownerPubB64 = encodeBase64(ownerKeys.publicKey);
@@ -26,7 +27,7 @@ function makeClaim(
   const govVersion = overrides.govVersion ?? 2;
   const govSig = signGroupGovernance(
     { groupId: GROUP_ID, ownerId: OWNER_ID, admins, moderators, permissions, govVersion },
-    ownerKeys.secretKey,
+    vk(ownerKeys.secretKey),
   );
   return { admins, moderators, permissions, govSig, govVersion };
 }
@@ -85,7 +86,7 @@ describe('decideGovernanceUpdate', () => {
       ...claim,
       govSig: signGroupGovernance(
         { groupId: GROUP_ID, ownerId: OWNER_ID, admins: claim.admins, moderators: claim.moderators, permissions: claim.permissions, govVersion: claim.govVersion },
-        impostor.secretKey,
+        vk(impostor.secretKey),
       ),
     };
     expect(decideGovernanceUpdate({ ...base, claimed: forged }).kind).toBe('reject');

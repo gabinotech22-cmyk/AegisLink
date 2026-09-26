@@ -246,6 +246,14 @@ FN(vaultDeriveEd25519)(JNIEnv *env, jclass cls, jobject handle, jobject blob, jo
   return aegis_vault_derive_ed25519(HANDLE_OUT(0), S(1), S(2), xh);
 }
 
+FN(vaultCopy)(JNIEnv *env, jclass cls, jobject handle, jobject blob, jobject src, jobject slot) {
+  uint32_t sh;
+  (void) cls;
+  SPANS(4, handle, blob, src, slot)
+  if (in_handle(&s[2], &sh) != 0) return AEGIS_EBADLEN;
+  return aegis_vault_copy(HANDLE_OUT(0), S(1), sh, S(3));
+}
+
 FN(vaultRelease)(JNIEnv *env, jclass cls, jobject handle) {
   uint32_t h;
   (void) cls;
@@ -292,6 +300,14 @@ FN(vaultMlkem768Dec)(JNIEnv *env, jclass cls, jobject handle, jobject ss, jobjec
   SPANS(3, handle, ss, ct)
   if (in_handle(&s[0], &h) != 0) return AEGIS_EBADLEN;
   return aegis_vault_mlkem768_dec(h, S(1), S(2));
+}
+
+FN(vaultExport)(JNIEnv *env, jclass cls, jobject handle, jint type, jobject out) {
+  uint32_t h;
+  (void) cls;
+  SPANS(2, handle, out)
+  if (in_handle(&s[0], &h) != 0) return AEGIS_EBADLEN;
+  return aegis_vault_export(h, (int) type, S(1));
 }
 
 FN(vaultLiveKeys)(JNIEnv *env, jclass cls) {

@@ -17,10 +17,11 @@ import {
   openSenderKeyDistribution,
   SEAL_CHUNK_SIZE,
 } from '../channelKey';
+import { vk } from './helpers/rawIdentity';
 
 describe('sealSenderKeyForRecipients', () => {
   const sender = nacl.box.keyPair();
-  const senderSecretKeyB64 = encodeBase64(sender.secretKey);
+  const senderSecretKey = vk(sender.secretKey);
   const senderPublicKeyB64 = encodeBase64(sender.publicKey);
 
   function makeRecipients(n: number) {
@@ -29,7 +30,7 @@ describe('sealSenderKeyForRecipients', () => {
       return {
         aegisId: `member-${i}`,
         publicKeyB64: encodeBase64(kp.publicKey),
-        secretKeyB64: encodeBase64(kp.secretKey),
+        secretKey: vk(kp.secretKey),
       };
     });
   }
@@ -45,7 +46,7 @@ describe('sealSenderKeyForRecipients', () => {
       sk,
       'group-xyz',
       'sender-aegis',
-      senderSecretKeyB64,
+      senderSecretKey,
       recipients.map((r) => ({ aegisId: r.aegisId, publicKeyB64: r.publicKeyB64 })),
     );
 
@@ -62,14 +63,14 @@ describe('sealSenderKeyForRecipients', () => {
 
       // The matching recipient — and only it — recovers the SenderKey AND the
       // authenticated senderAegisId from inside the box.
-      const opened = openSenderKeyDistribution(dist, recipients[i].secretKeyB64, senderPublicKeyB64);
+      const opened = openSenderKeyDistribution(dist, recipients[i].secretKey, senderPublicKeyB64);
       expect(opened).not.toBeNull();
       expect(Array.from(opened!.senderKey.chainKey)).toEqual(Array.from(sk.chainKey));
       expect(opened!.senderKey.iteration).toBe(sk.iteration);
       expect(opened!.senderAegisId).toBe('sender-aegis');
 
       // A different recipient's secret key cannot open this box → null (no throw).
-      const wrong = recipients[(i + 1) % count].secretKeyB64;
+      const wrong = recipients[(i + 1) % count].secretKey;
       expect(openSenderKeyDistribution(dist, wrong, senderPublicKeyB64)).toBeNull();
     });
   });
@@ -79,7 +80,7 @@ describe('sealSenderKeyForRecipients', () => {
       generateSenderKey(),
       'g',
       'sender-aegis',
-      senderSecretKeyB64,
+      senderSecretKey,
       [],
     );
     expect(sealed).toEqual([]);

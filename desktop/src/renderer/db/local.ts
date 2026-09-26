@@ -6,6 +6,7 @@
  */
 
 import '../crypto/ipc-types';
+import { vault } from '../crypto/sodium/vault';
 
 // Public-channel feed cache, re-exported here so callers import it from the same
 // place as everything else (mobile/src/db/local.ts does the same).
@@ -67,6 +68,9 @@ export async function closeActiveDatabase(): Promise<void> {
 }
 
 export async function deleteIdentitySlot(slot: string): Promise<void> {
+  // Cryptographic erase (F-1b): the profile's KEK and its vault keys go, so a
+  // surviving copy of any of its blobs is unreadable.
+  await vault.destroyProfile(slot).catch(() => {});
   await secureStorage().delete(getSecretKeySlot(slot)).catch(() => {});
   await secureStorage().delete(getSignSecretKeySlot(slot)).catch(() => {});
 
@@ -86,32 +90,41 @@ export async function deleteIdentitySlot(slot: string): Promise<void> {
 export interface StoredIdentity {
   aegisId: string;
   publicKeyB64: string;
-  secretKeyB64: string;
+  /** The X25519 identity key as a vault blob ("vault1:…", F-1b); raw base64 if stored before F-1b. */
+  secretKeyStored: string;
   signingPublicKeyB64: string;
-  signingSecretKeyB64: string;
+  /** The Ed25519 identity key, same form. */
+  signingSecretKeyStored: string;
   createdAt: number;
 }
 
 export async function saveIdentity(v: StoredIdentity): Promise<void> {
-  await secureStorage().set(getSecretKeySlot(), v.secretKeyB64);
-  await secureStorage().set(getSignSecretKeySlot(), v.signingSecretKeyB64);
-  await db().saveIdentity(activeSlot, v);
+  await secureStorage().set(getSecretKeySlot(), v.secretKeyStored);
+  await secureStorage().set(getSignSecretKeySlot(), v.signingSecretKeyStored);
+  // Main stores only the public row (aegisId, public keys, createdAt).
+  await db().saveIdentity(activeSlot, {
+    aegisId: v.aegisId,
+    publicKeyB64: v.publicKeyB64,
+    signingPublicKeyB64: v.signingPublicKeyB64,
+    createdAt: v.createdAt,
+  });
 }
 
 export async function loadIdentity(): Promise<StoredIdentity | null> {
-  const secretKeyB64 = await secureStorage().get(getSecretKeySlot());
-  const signingSecretKeyB64 = await secureStorage().get(getSignSecretKeySlot());
-  if (!secretKeyB64 || !signingSecretKeyB64) return null;
+  const secretKeyStored = await secureStorage().get(getSecretKeySlot());
+  const signingSecretKeyStored = await secureStorage().get(getSignSecretKeySlot());
+  if (!secretKeyStored || !signingSecretKeyStored) return null;
   const row = await db().loadIdentity(activeSlot);
   if (!row) return null;
   return {
     ...row,
-    secretKeyB64,
-    signingSecretKeyB64
+    secretKeyStored,
+    signingSecretKeyStored
   };
 }
 
 export async function clearIdentity(): Promise<void> {
+  await vault.destroyProfile(activeSlot).catch(() => {});
   await secureStorage().delete(getSecretKeySlot());
   await secureStorage().delete(getSignSecretKeySlot());
   await db().clearIdentity();
@@ -332,6 +345,8 @@ export async function getGroup(id: string): Promise<StoredGroup | null> {
 // ─── Panic wipe ──────────────────────────────────────────────────────────────
 
 export async function wipeDatabase(): Promise<void> {
+  // Cryptographic erase of the profile's vault KEK first (F-1b).
+  await vault.destroyProfile(activeSlot).catch(() => {});
   await secureStorage().delete(getSecretKeySlot());
   await secureStorage().delete(getSignSecretKeySlot());
   // Prekey secrets (SPK/OPK/PQSPK incl. the 2400-byte ML-KEM-768 PQSPK) live in

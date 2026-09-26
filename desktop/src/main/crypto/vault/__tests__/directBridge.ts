@@ -25,8 +25,23 @@ export const memoryKekStore: KekStore = {
 
 const vault = new KeyVault(memoryKekStore)
 
+/** The native export dialog, answered by tests (`setExportAnswer`); yes by default. */
+let exportAnswer = true
+export const exportPrompts: string[] = []
+export function setExportAnswer(yes: boolean): void {
+  exportAnswer = yes
+}
+
 const bridge = {
-  call: (op: string, args: unknown[]): unknown => structuredClone(runVaultOp(vault, op, structuredClone(args))),
+  call: (op: string, args: unknown[]): unknown =>
+    structuredClone(
+      runVaultOp(vault, op, structuredClone(args), {
+        confirmExport: (purpose) => {
+          exportPrompts.push(purpose)
+          return exportAnswer
+        },
+      }),
+    ),
 }
 
 export function vaultBridge(): typeof bridge {

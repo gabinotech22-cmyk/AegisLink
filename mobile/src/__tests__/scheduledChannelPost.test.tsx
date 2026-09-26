@@ -54,7 +54,7 @@ jest.mock('../store/channels', () => ({
 jest.mock('../store/identity', () => ({
   useIdentity: {
     getState: () => ({
-      identity: { aegisId: 'me-123', signingPublicKey: new Uint8Array(32), signingSecretKey: new Uint8Array(64) },
+      identity: { aegisId: 'me-123', signingPublicKey: new Uint8Array(32), signingSecretKey: require('../crypto/__tests__/helpers/rawIdentity').testSignKey() },
     }),
   },
 }));

@@ -84,16 +84,17 @@ jest.mock('../db/local', () => ({
 
 // Mock crypto/identity
 jest.mock('../crypto/identity', () => ({
+  moveIdentity: jest.fn((identity: unknown) => identity),
   createIdentity: jest.fn(() => ({
     aegisId: 'ABC-DEF1-GH23',
     publicKey: new Uint8Array(32),
-    secretKey: new Uint8Array(32),
+    secretKey: require('../crypto/__tests__/helpers/rawIdentity').testBoxKey(),
     publicKeyB64: 'cHVibGljS2V5QmFzZTY0',
-    secretKeyB64: 'c2VjcmV0S2V5QmFzZTY0',
+    secretKeyStored: 'vault1:c2VjcmV0S2V5QmFzZTY0',
     signingPublicKey: new Uint8Array(32),
-    signingSecretKey: new Uint8Array(64),
+    signingSecretKey: require('../crypto/__tests__/helpers/rawIdentity').testSignKey(),
     signingPublicKeyB64: 'c2lnbmluZ1B1YkI2NA==',
-    signingSecretKeyB64: 'c2lnbmluZ1NlY0I2NA==',
+    signingSecretKeyStored: 'vault1:c2lnbmluZ1NlY0I2NA==',
     createdAt: 1700000000000,
   })),
 }));

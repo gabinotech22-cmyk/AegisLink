@@ -30,4 +30,40 @@ describe('runVaultOp', () => {
     expect(runVaultOp(vault, 'lock', ['self'])).toEqual({ ok: true, value: undefined })
     expect(runVaultOp(vault, 'scalarMult', [value.handle, new Uint8Array(32).fill(9)])).toMatchObject({ ok: false, code: 'NOKEY' })
   })
+
+  it('a raw key leaves only for a declared export, and only when the user confirms (native dialog)', () => {
+    runVaultOp(vault, 'unlock', ['self'])
+    const g = runVaultOp(vault, 'generate', ['self', 'x25519']) as { value: { handle: number } }
+    const asked: string[] = []
+    const yes = { confirmExport: (p: string) => (asked.push(p), true) }
+    const no = { confirmExport: (p: string) => (asked.push(p), false) }
+    // No hooks (the default): never.
+    expect(runVaultOp(vault, 'exportSecret', [g.value.handle, 'x25519', 'backup'])).toMatchObject({ ok: false, code: 'DENIED' })
+    // Declined in the dialog.
+    expect(runVaultOp(vault, 'exportSecret', [g.value.handle, 'x25519', 'backup'], no)).toMatchObject({ ok: false, code: 'DENIED' })
+    // A purpose outside the explicit exports is refused before asking anybody.
+    expect(runVaultOp(vault, 'exportSecret', [g.value.handle, 'x25519', 'debug'], yes)).toMatchObject({ ok: false, code: 'BAD_ARG' })
+    expect(asked).toEqual(['backup'])
+    // Confirmed: 32 raw bytes.
+    const r = runVaultOp(vault, 'exportSecret', [g.value.handle, 'x25519', 'recoveryPhrase'], yes) as { ok: boolean; value: Uint8Array }
+    expect(r.ok).toBe(true)
+    expect(r.value).toHaveLength(32)
+    expect(asked).toEqual(['backup', 'recoveryPhrase'])
+    // Wrong declared type: not available.
+    expect(runVaultOp(vault, 'exportSecret', [g.value.handle, 'ed25519', 'backup'], yes)).toMatchObject({ ok: false, code: 'NOKEY' })
+    runVaultOp(vault, 'lock', ['self'])
+  })
+
+  it('copy re-wraps a key for another unlocked profile only', () => {
+    runVaultOp(vault, 'unlock', ['self'])
+    const g = runVaultOp(vault, 'generate', ['self', 'x25519']) as { value: { handle: number; publicKey: Uint8Array } }
+    expect(runVaultOp(vault, 'copy', [g.value.handle, 'locked-slot'])).toMatchObject({ ok: false, code: 'NOKEY' })
+    runVaultOp(vault, 'unlock', ['work'])
+    const c = runVaultOp(vault, 'copy', [g.value.handle, 'work']) as { ok: boolean; value: { blob: Uint8Array; publicKey: Uint8Array } }
+    expect(c.ok).toBe(true)
+    expect(c.value.publicKey).toEqual(g.value.publicKey)
+    expect(runVaultOp(vault, 'load', ['work', c.value.blob])).toMatchObject({ ok: true })
+    expect(runVaultOp(vault, 'load', ['self', c.value.blob])).toMatchObject({ ok: false, code: 'REJECTED' })
+    runVaultOp(vault, 'lockAll', [])
+  })
 })

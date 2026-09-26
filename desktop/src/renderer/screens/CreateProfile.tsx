@@ -46,7 +46,9 @@ export function CreateProfileScreen({ onBack, onCreated }: Props) {
     // the step reads as something happening rather than a flash.
     const timer = setTimeout(() => {
       try {
-        const id = createIdentity();
+        // Minted in the active profile's vault (unlocked); createProfile copies
+        // it into the new profile once its slot (this AegisID) exists.
+        const id = createIdentity(useProfiles.getState().activeSlotId || 'self');
         identityRef.current = id;
         setAegisId(id.aegisId);
         setPublicKeyB64(id.publicKeyB64);

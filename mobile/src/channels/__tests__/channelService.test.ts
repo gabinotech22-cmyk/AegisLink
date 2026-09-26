@@ -24,6 +24,7 @@ import {
   signManifest,
   type ChannelManifestData,
 } from '../../crypto/publicChannelKey';
+import { vk } from '../../crypto/__tests__/helpers/rawIdentity';
 
 const SENDER_SEED = (() => {
   const s = new Uint8Array(32);
@@ -52,7 +53,7 @@ function buildChain(n: number): { wire: SealedWirePost[]; head: ChainHead } {
       CHANNEL_ID,
       { from: SENDER_FROM, body: `post ${i}`, ts: 1750000000000 + i },
       head,
-      senderKp.secretKey,
+      vk(senderKp.secretKey),
       cek,
     );
     wire.push({ seqNum: out.seqNum, ciphertext: out.wire.ciphertext, nonce: out.wire.nonce });
@@ -107,7 +108,7 @@ describe('integrity rejections', () => {
       CHANNEL_ID,
       { from: SENDER_FROM, body: 'forged', ts: 1750000009999 },
       { seqNum: 0, postHash: new Uint8Array(32).fill(9) },
-      senderKp.secretKey,
+      vk(senderKp.secretKey),
       cek,
     );
     const tampered = [wire[0], { seqNum: 1, ciphertext: forged.wire.ciphertext, nonce: forged.wire.nonce }, wire[2]];
@@ -262,7 +263,7 @@ describe('post body senderName envelope (issue #204)', () => {
       CHANNEL_ID,
       { from: SENDER_FROM, body: wireBody, ts: 1750000000123 },
       null,
-      senderKp.secretKey,
+      vk(senderKp.secretKey),
       cek,
     );
     const result = ingestChannelPosts(
@@ -284,7 +285,7 @@ describe('post body senderName envelope (issue #204)', () => {
       CHANNEL_ID,
       { from: SENDER_FROM, body: 'legacy plain body', ts: 1750000000456 },
       null,
-      senderKp.secretKey,
+      vk(senderKp.secretKey),
       cek,
     );
     const result = ingestChannelPosts(

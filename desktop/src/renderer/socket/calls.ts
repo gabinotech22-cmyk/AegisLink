@@ -24,6 +24,7 @@ import { useContacts } from '../store/contacts';
 import { TOR_RELAY } from '../config';
 import { homeRelayBaseUrl } from '../net/homeRelay';
 import { nacl } from '../crypto/sodium';
+import { vault, type VaultKey } from '../crypto/sodium/vault';
 import { decodeBase64, encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import {
   sealCallInvite,
@@ -95,7 +96,7 @@ async function fetchTurnConfig(_aegisId: string): Promise<RTCConfigShape> {
   const ts = Date.now();
   const bucket = Math.floor(ts / 30_000);
   const sig = encodeBase64(
-    nacl.sign.detached(decodeUTF8(`${id.aegisId}:turn:${bucket}`), id.signingSecretKey),
+    vault.sign(id.signingSecretKey, decodeUTF8(`${id.aegisId}:turn:${bucket}`)),
   );
   try {
     const query =
@@ -252,7 +253,7 @@ function forgetCallKey(callId: string): void {
   if (k) { k.fill(0); callKeys.delete(callId); }
 }
 
-function ownSealedKeys(): { secretKey: Uint8Array; signingSecretKey: Uint8Array; aegisId: string } | null {
+function ownSealedKeys(): { secretKey: VaultKey; signingSecretKey: VaultKey; aegisId: string } | null {
   const id = useIdentity.getState().identity;
   if (!id?.signingSecretKey) return null;
   return { secretKey: id.secretKey, signingSecretKey: id.signingSecretKey, aegisId: id.aegisId };

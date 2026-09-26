@@ -12,22 +12,12 @@ import {
 import { initRatchet, ratchetEncrypt, ratchetDecrypt } from '../ratchet';
 import { type Identity } from '../../identity';
 import { hkdfSHA256 } from '../kdf';
+import { identityFromRaw } from '../../__tests__/helpers/rawIdentity';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return {
-    aegisId: 'TEST' + encodeBase64(box.publicKey).slice(0, 8),
-    publicKey: box.publicKey,
-    secretKey: box.secretKey,
-    publicKeyB64: encodeBase64(box.publicKey),
-    secretKeyB64: encodeBase64(box.secretKey),
-    signingPublicKey: sign.publicKey,
-    signingSecretKey: sign.secretKey,
-    signingPublicKeyB64: encodeBase64(sign.publicKey),
-    signingSecretKeyB64: encodeBase64(sign.secretKey),
-    createdAt: Date.now(),
-  };
+  return identityFromRaw(box, sign, 'TEST' + encodeBase64(box.publicKey).slice(0, 8));
 }
 
 describe('performX3DH — SPK signature verification (FND-02)', () => {

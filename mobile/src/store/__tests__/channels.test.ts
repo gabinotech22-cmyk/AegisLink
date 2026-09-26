@@ -86,6 +86,7 @@ import {
 } from '../../crypto/publicChannelKey';
 import { parseInviteLink } from '../../channels/inviteLink';
 import type { Identity } from '../../crypto/identity';
+import { vk } from '../../crypto/__tests__/helpers/rawIdentity';
 
 const CHANNEL_ID = 'SKKk3vgfTWu1MxRtJYx6DA==';
 
@@ -93,7 +94,7 @@ const meKp = nacl.sign.keyPair.fromSeed(new Uint8Array(32).fill(7));
 const identity = {
   aegisId: 'AEGIS-ME',
   signingPublicKey: meKp.publicKey,
-  signingSecretKey: meKp.secretKey,
+  signingSecretKey: vk(meKp.secretKey),
 } as unknown as Identity;
 
 const cek = new Uint8Array(32).map((_, i) => (i * 7 + 3) & 0xff);
@@ -323,7 +324,7 @@ describe('joinViaInvite (gap D)', () => {
 
     // A different user joins from the invite link.
     useChannels.setState({ subscribed: [] });
-    const joiner = { aegisId: 'AEGIS-JOINER', signingPublicKey: meKp.publicKey, signingSecretKey: meKp.secretKey } as unknown as Identity;
+    const joiner = { aegisId: 'AEGIS-JOINER', signingPublicKey: meKp.publicKey, signingSecretKey: vk(meKp.secretKey) } as unknown as Identity;
     const res = await useChannels.getState().joinViaInvite(created.invite!, joiner);
 
     expect(res).toEqual({ ok: true, channelId: created.channelId });
@@ -794,7 +795,7 @@ describe('member ban (issue #207 — owner moderation, docs §10.4)', () => {
     useChannels.setState({ banned: { [CHANNEL_ID]: [eve] } });
 
     const p0 = sealAs('mine', null);
-    const p1 = buildAndSealPost(CHANNEL_ID, { from: eve, body: 'banned post', ts: 1750000000001 }, p0.newHead, eveKp.secretKey, cek);
+    const p1 = buildAndSealPost(CHANNEL_ID, { from: eve, body: 'banned post', ts: 1750000000001 }, p0.newHead, vk(eveKp.secretKey), cek);
     (socket.pubchannelPull as jest.Mock).mockResolvedValue({
       ok: true,
       posts: [

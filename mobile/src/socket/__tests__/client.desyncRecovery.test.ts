@@ -146,22 +146,13 @@ jest.mock('socket.io-client', () => ({
 }));
 
 import type { Identity } from '../../crypto/identity';
+import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
+import { vault } from '../../crypto/sodium/vault';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return {
-    aegisId: 'AEGIS' + encodeBase64(box.publicKey).slice(0, 6),
-    publicKey: box.publicKey,
-    secretKey: box.secretKey,
-    publicKeyB64: encodeBase64(box.publicKey),
-    secretKeyB64: encodeBase64(box.secretKey),
-    signingPublicKey: sign.publicKey,
-    signingSecretKey: sign.secretKey,
-    signingPublicKeyB64: encodeBase64(sign.publicKey),
-    signingSecretKeyB64: encodeBase64(sign.secretKey),
-    createdAt: Date.now(),
-  };
+  return identityFromRaw(box, sign, 'AEGIS' + encodeBase64(box.publicKey).slice(0, 6));
 }
 
 /**
@@ -173,7 +164,7 @@ function buildIdentity(): Identity {
 function buildDesyncedEnvelope(me: Identity, peer: Identity, createdAtMs: number) {
   // Peer performs X3DH against a bundle for `me` and gets a sender ratchet.
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, me.signingSecretKey);
+  const sig = vault.sign(me.signingSecretKey, spk.publicKey);
   const bundle = {
     identityKeyB64: me.publicKeyB64,
     signingPublicKeyB64: me.signingPublicKeyB64,
@@ -217,7 +208,7 @@ function buildDesyncedEnvelope(me: Identity, peer: Identity, createdAtMs: number
  *  the peer's prekeys) can complete a full fresh X3DH instead of hanging. */
 function setPeerBundle(peer: Identity) {
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, peer.signingSecretKey);
+  const sig = vault.sign(peer.signingSecretKey, spk.publicKey);
   (mockFakeSocket as unknown as { nextBundle: unknown }).nextBundle = {
     identityKeyB64: peer.publicKeyB64,
     signingPublicKeyB64: peer.signingPublicKeyB64,

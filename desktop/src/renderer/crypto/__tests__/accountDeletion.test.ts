@@ -20,6 +20,7 @@ vi.mock('../../config', () => ({ RELAY_URL: 'https://relay.test', ONION_URL: nul
 
 import { deleteAccountOnRelay } from '../accountDeletion';
 import type { Identity } from '../identity';
+import { vk } from './helpers/rawIdentity';
 
 const AEGIS_ID = 'ABC-DEFG-HJKM';
 
@@ -27,7 +28,7 @@ function makeIdentity(): { identity: Identity; signingPublicKey: Uint8Array } {
   const sign = nacl.sign.keyPair();
   const identity = {
     aegisId: AEGIS_ID,
-    signingSecretKey: sign.secretKey,
+    signingSecretKey: vk(sign.secretKey),
     signingPublicKeyB64: encodeBase64(sign.publicKey),
   } as unknown as Identity;
   return { identity, signingPublicKey: sign.publicKey };

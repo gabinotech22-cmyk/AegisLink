@@ -27,24 +27,12 @@ export interface KeyPair {
   secretKey: Uint8Array;
 }
 
-/** The user's long-term identity. Lives in expo-secure-store ONLY. */
-export interface Identity {
-  /** 11-char Crockford Base32 fingerprint formatted "XXX-XXXX-XXXX". */
-  aegisId: string;
-  /** X25519 public key (Curve25519) — used for ECDH. */
-  publicKey: Uint8Array;
-  /** X25519 secret key — NEVER leaves the device. */
-  secretKey: Uint8Array;
-  publicKeyB64: string;
-  secretKeyB64: string;
-  /** Ed25519 public — used to verify signed prekeys. */
-  signingPublicKey: Uint8Array;
-  /** Ed25519 secret — NEVER leaves the device. */
-  signingSecretKey: Uint8Array;
-  signingPublicKeyB64: string;
-  signingSecretKeyB64: string;
-  createdAt: number;
-}
+/**
+ * The user's long-term identity. Its private keys are key-vault handles (F-1b,
+ * docs/F1B-KEY-VAULT-DESIGN.md): the secrets never exist in JavaScript.
+ * Defined in ./identity.
+ */
+export type { Identity } from './identity';
 
 /** What the backend stores as the user's public profile. No secrets. */
 export interface PublicIdentity {

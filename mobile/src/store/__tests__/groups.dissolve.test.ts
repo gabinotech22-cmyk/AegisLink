@@ -22,7 +22,7 @@ jest.mock('../../db/local', () => ({
 
 // ── store/identity (lazy required by dissolveGroup/signAsAdmin) ────────────
 const mockIdentityState: { identity: { aegisId: string; signingSecretKey: Uint8Array } | null } = {
-  identity: { aegisId: 'admin-id', signingSecretKey: new Uint8Array(64) },
+  identity: { aegisId: 'admin-id', signingSecretKey: require('../../crypto/__tests__/helpers/rawIdentity').testSignKey() },
 };
 jest.mock('../identity', () => ({
   __esModule: true,
@@ -79,7 +79,7 @@ const memberGroup: StoredGroup = {
 describe('groups store — dissolveGroup (admin-only, signed broadcast)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    mockIdentityState.identity = { aegisId: 'admin-id', signingSecretKey: new Uint8Array(64) };
+    mockIdentityState.identity = { aegisId: 'admin-id', signingSecretKey: require('../../crypto/__tests__/helpers/rawIdentity').testSignKey() };
     useGroups.setState({ groups: [{ ...adminGroup }, { ...memberGroup }] });
   });
 

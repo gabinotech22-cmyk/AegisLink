@@ -1,4 +1,5 @@
 import { nacl, ml_kem768 } from '../sodium';
+import { vault } from '../sodium/vault';
 import { logger } from '../../utils/logger';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { hkdfSHA256 } from './kdf';
@@ -207,7 +208,7 @@ export function performX3DH(
     //    DH1 = DH(IK_sender, SPK_receiver)
     //    DH2 = DH(EK_sender, IK_receiver)
     //    DH3 = DH(EK_sender, SPK_receiver)
-    dh1 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, bobSPK), 'DH1');
+    dh1 = assertNonZeroDH(vault.scalarMult(myIdentity.secretKey, bobSPK), 'DH1');
     dh2 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobIK), 'DH2');
     dh3 = assertNonZeroDH(nacl.scalarMult(myEK_sec, bobSPK), 'DH3');
 
@@ -338,8 +339,8 @@ export function performX3DHReceiver(
   aliceEK: Uint8Array,
   pq?: X3DHReceiverPqInputs | null,
 ): Uint8Array {
-  // Intermediates zeroized in `finally` below. NOTE: mySpkSecret/myOpkSecret/
-  // myIdentity.secretKey are caller-owned (the SPK in particular is reused
+  // Intermediates zeroized in `finally` below. NOTE: mySpkSecret/myOpkSecret
+  // are caller-owned (the SPK in particular is reused
   // across many incoming handshakes) and must NOT be zeroized here.
   let dh1: Uint8Array | undefined;
   let dh2: Uint8Array | undefined;
@@ -352,7 +353,7 @@ export function performX3DHReceiver(
   try {
     // Mirror sender's DH order: DH1=DH(SPK,IK_alice), DH2=DH(IK,EK_alice), DH3=DH(SPK,EK_alice)
     dh1 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceIK), 'DH1');
-    dh2 = assertNonZeroDH(nacl.scalarMult(myIdentity.secretKey, aliceEK), 'DH2');
+    dh2 = assertNonZeroDH(vault.scalarMult(myIdentity.secretKey, aliceEK), 'DH2');
     dh3 = assertNonZeroDH(nacl.scalarMult(mySpkSecret, aliceEK), 'DH3');
 
     // Signal spec: prepend 32 bytes of 0xFF
@@ -483,7 +484,7 @@ export function generatePreKeys(
 ): DevicePreKeySet {
   // Signed PreKey
   const spk = nacl.box.keyPair();
-  const signature = nacl.sign.detached(spk.publicKey, identity.signingSecretKey);
+  const signature = vault.sign(identity.signingSecretKey, spk.publicKey);
 
   // Signed PQ PreKey (ML-KEM-768), signed with the SAME Ed25519 identity key.
   let pq: ReturnType<typeof ml_kem768.keygen>;
@@ -492,7 +493,7 @@ export function generatePreKeys(
   } catch (e) {
     throw tagError('ml_kem768.keygen', e);
   }
-  const pqSignature = nacl.sign.detached(pq.publicKey, identity.signingSecretKey);
+  const pqSignature = vault.sign(identity.signingSecretKey, pq.publicKey);
 
   const oneTimePreKeys: { keyId: number; publicKeyB64: string }[] = [];
   const opkSecrets = new Map<number, Uint8Array>();
@@ -544,14 +545,14 @@ function reconstructPreKeySetFromSecrets(
   pqSpkSecret: Uint8Array,
 ): DevicePreKeySet {
   const spkPublic = nacl.scalarMult.base(spkSecret);
-  const signature = nacl.sign.detached(spkPublic, identity.signingSecretKey);
+  const signature = vault.sign(identity.signingSecretKey, spkPublic);
 
   // ML-KEM-768 secret keys embed their public key (FIPS 203 sk = ek || …), so
   // getPublicKey deterministically recovers the SAME pubkey we first published;
   // re-signing with the identity key reproduces the exact bundle material. This
   // keeps the single-source-of-truth invariant for the PQSPK too.
   const pqSpkPublic = ml_kem768.getPublicKey(pqSpkSecret);
-  const pqSignature = nacl.sign.detached(pqSpkPublic, identity.signingSecretKey);
+  const pqSignature = vault.sign(identity.signingSecretKey, pqSpkPublic);
 
   const oneTimePreKeys: { keyId: number; publicKeyB64: string }[] = [];
   const opkSecrets = new Map<number, Uint8Array>();

@@ -1,6 +1,7 @@
 # F-1b — Bóveda de claves nativa (claves privadas fuera de la memoria de JavaScript)
 
-> Estado: **DISEÑO v1** (2026-09-25). Alcance aprobado por el dueño: **fases 1, 2 y 3**, mobile y
+> Estado: **DISEÑO v1** (2026-09-25); fases 1a y 1b implementadas (§5 describe lo que se hizo de
+> verdad en las exportaciones). Alcance aprobado por el dueño: **fases 1, 2 y 3**, mobile y
 > desktop; UnifiedPush va después. Estado de cada fase: `docs/ROADMAP.md` → Hito 3 (fuente única).
 > Reglas de oro: #1 (fail-closed), #5 (paridad), #8 (constant-time), #9 (zeroizar), #11 (un test por
 > fix), #12 (mirar a los expertos).
@@ -86,13 +87,32 @@ después de F-1b, y se documenta como tal.
 
 ## 5. Exportaciones explícitas (las únicas salidas de la clave)
 
-- **Backup cifrado:** la bóveda lo produce ella misma (Argon2id + secretbox en nativo, ya existe),
-  así que JS recibe el sobre cifrado, no las claves.
-- **Vincular dispositivo:** la bóveda cifra el paquete de identidad para la clave pública del
-  dispositivo nuevo (`box`), sin pasar por JS.
-- **Frase de recuperación (32 palabras):** mostrarla exige que JS tenga las palabras, que son la
-  clave. **Decisión de producto** (ver §7): se mantiene como exportación explícita, bajo PIN y con
-  borrado inmediato de la memoria de la pantalla.
+Implementado en 1b (2026-09-26) con **una sola** operación de salida, `vault.exportSecret` (C:
+`aegis_vault_export`; desktop: `KeyVault.exportSecret`), que devuelve la clave cruda para que la
+pantalla que la necesita la use y la ponga a cero:
+
+- **Backup cifrado** (`screens/Backup.tsx`): la clave entra en el payload y se sella en el acto con
+  la passphrase (Argon2id + secretbox). El formato del archivo no cambia.
+- **Vincular dispositivo** (`screens/Devices.tsx`, solo móvil; el escritorio recibe, nunca envía):
+  el paquete se cifra en el acto con `box` para la clave efímera del dispositivo nuevo. El formato
+  no cambia.
+- **Frase de recuperación (32 palabras):** se exporta solo mientras el usuario la tiene revelada
+  (§7 decidió mantenerla).
+
+Por qué no se construyen el backup y el paquete de vinculación dentro de la bóveda, como decía la
+v1 de este diseño: la bóveda tendría que cifrar para una clave que elige JS, así que un JS
+comprometido le pediría cifrar para una clave suya y obtendría lo mismo que con una exportación.
+El control real está en **quién puede pedir la exportación**:
+
+- **Escritorio:** el proceso main pregunta al usuario con un **diálogo nativo** antes de cada
+  exportación (`main/ipc/vault.ts`, `confirmExport`); el renderer no puede verlo ni pulsarlo, así
+  que un XSS puede *usar* las claves mientras la app corre, pero no sacarlas en silencio.
+  Test: `main/crypto/vault/__tests__/ops.test.ts`.
+- **Ambas plataformas:** un test de guarda (`crypto/__tests__/vaultExport.guard.test.ts`) exige que
+  cada llamada a la exportación esté en una lista cerrada de ficheros.
+- **Límite honesto:** mientras dura una exportación o una importación (restaurar backup, frase o
+  vinculación, y la migración única del §4) la clave pasa por JS, también como cadena base64 que no
+  se puede poner a cero. Es un acto puntual del usuario, no el estado normal de la app.
 - **Modo pánico / borrado de perfil:** `vault.destroyProfile(slot)` borra la KEK del Keychain/
   Keystore: los blobs restantes quedan ilegibles aunque sobrevivan en disco (borrado criptográfico).
 

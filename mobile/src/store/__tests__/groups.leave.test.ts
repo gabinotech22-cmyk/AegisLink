@@ -20,7 +20,7 @@ jest.mock('../../db/local', () => ({
   deleteGroup: (...args: unknown[]) => mockDeleteGroup(...args),
   deleteContactMessages: (...args: unknown[]) => mockDeleteContactMessages(...args),
 }));
-const mockIdentityState = { identity: { aegisId: 'me', signingSecretKey: new Uint8Array(64) } };
+const mockIdentityState = { identity: { aegisId: 'me', signingSecretKey: require('../../crypto/__tests__/helpers/rawIdentity').testSignKey() } };
 jest.mock('../identity', () => ({ __esModule: true, useIdentity: { getState: () => mockIdentityState } }));
 const mockBroadcastGroupLeave = jest.fn().mockResolvedValue(undefined);
 jest.mock('../../socket/client', () => ({

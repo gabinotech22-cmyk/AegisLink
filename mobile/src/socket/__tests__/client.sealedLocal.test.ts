@@ -235,28 +235,19 @@ jest.mock('socket.io-client', () => ({
 }));
 
 import type { Identity } from '../../crypto/identity';
+import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
+import { vault } from '../../crypto/sodium/vault';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return {
-    aegisId: deriveAegisId(box.publicKey),
-    publicKey: box.publicKey,
-    secretKey: box.secretKey,
-    publicKeyB64: encodeBase64(box.publicKey),
-    secretKeyB64: encodeBase64(box.secretKey),
-    signingPublicKey: sign.publicKey,
-    signingSecretKey: sign.secretKey,
-    signingPublicKeyB64: encodeBase64(sign.publicKey),
-    signingSecretKeyB64: encodeBase64(sign.secretKey),
-    createdAt: Date.now(),
-  } as Identity;
+  return identityFromRaw(box, sign);
 }
 
 /** Serve `peer`'s prekey bundle from THEIR relay (foreignRelayHttp seam). Returns the SPK pair. */
 function foreignPeerBundleVia(peer: Identity) {
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, peer.signingSecretKey);
+  const sig = vault.sign(peer.signingSecretKey, spk.publicKey);
   const bundle = {
     identityKeyB64: peer.publicKeyB64,
     signingPublicKeyB64: peer.signingPublicKeyB64,
@@ -474,7 +465,7 @@ describe('sealed transport to contacts on our relay (caps-gated)', () => {
     mockRoots.add(peer.aegisId);
     // Their prekey bundle from OUR relay (home socket) for the X3DH init.
     const spk = nacl.box.keyPair();
-    const sig = nacl.sign.detached(spk.publicKey, peer.signingSecretKey);
+    const sig = vault.sign(peer.signingSecretKey, spk.publicKey);
     mockFakeSocket.emit.mockImplementation((event: string, _p: unknown, ack?: (a: unknown) => void) => {
       if (event === 'prekeys:fetch' && typeof ack === 'function') {
         ack({ ok: true, bundle: {

@@ -25,6 +25,7 @@ import {
 } from '../signal/ratchet';
 import { encryptMessage, openEnvelope, tryDecryptMessage } from '../messaging';
 import { stripAndPad, unpad, pickBucket } from '../metadata';
+import { vault } from '../sodium/vault';
 
 function setupSession() {
   const alice = runAnonymousOnboarding(5);
@@ -195,12 +196,7 @@ describe('tryDecryptMessage state isolation', () => {
     };
     const innerBytes = stripAndPad(tamperedInner as Record<string, unknown>);
     const outerNonce = nacl.randomBytes(nacl.box.nonceLength);
-    const outerCt = nacl.box(
-      innerBytes,
-      outerNonce,
-      bob.identity.publicKey,
-      alice.identity.secretKey,
-    );
+    const outerCt = vault.box(alice.identity.secretKey, innerBytes, outerNonce, bob.identity.publicKey);
     const corruptEnvelope = {
       ciphertextB64: encodeBase64(outerCt),
       nonceB64: encodeBase64(outerNonce),

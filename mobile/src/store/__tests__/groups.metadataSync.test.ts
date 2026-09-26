@@ -27,7 +27,7 @@ jest.mock('../../db/local', () => ({
 jest.mock('../identity', () => ({
   __esModule: true,
   useIdentity: {
-    getState: () => ({ identity: { aegisId: 'admin-id', signingSecretKey: new Uint8Array(64) } }),
+    getState: () => ({ identity: { aegisId: 'admin-id', signingSecretKey: require('../../crypto/__tests__/helpers/rawIdentity').testSignKey() } }),
   },
 }));
 

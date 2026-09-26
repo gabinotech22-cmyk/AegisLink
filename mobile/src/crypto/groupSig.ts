@@ -8,8 +8,9 @@
  * signing/verification bytes can never drift apart between producer and
  * verifier.
  *
- * PURE module: depends ONLY on tweetnacl, tweetnacl-util and @noble/hashes —
- * no stores, no socket, no DB — so importing it can never create a cycle.
+ * PURE module: depends ONLY on the crypto/sodium facade (signing by vault
+ * handle), tweetnacl-util and @noble/hashes — no stores, no socket, no DB — so
+ * importing it can never create a cycle.
  *
  * Any change to the canonical bytes, the version labels ('aegis.group.v1' /
  * 'aegis.group.v2'), the member sort, or the JSON array order is a WIRE-FORMAT
@@ -17,6 +18,7 @@
  * format instead of mutating an existing one.
  */
 import { nacl, sha256 } from './sodium';
+import { vault, type VaultKey } from './sodium/vault';
 import { decodeBase64, encodeBase64 } from 'tweetnacl-util';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { verifyDetached } from './ed25519';
@@ -88,9 +90,9 @@ export function canonicalGroupBytesV2(args: {
 /** Sign v1 canonical bytes with an Ed25519 signing secret key; returns Base64. */
 export function signGroupMetadata(
   args: { groupId: string; groupName: string; members: string[]; createdAt: number },
-  signingSecretKey: Uint8Array,
+  signingSecretKey: VaultKey,
 ): string {
-  const sig = nacl.sign.detached(canonicalGroupBytes(args), signingSecretKey);
+  const sig = vault.sign(signingSecretKey, canonicalGroupBytes(args));
   return encodeBase64(sig);
 }
 
@@ -180,9 +182,9 @@ export function signGroupGovernance(
     permissions: GroupPermissions;
     govVersion: number;
   },
-  signingSecretKey: Uint8Array,
+  signingSecretKey: VaultKey,
 ): string {
-  const sig = nacl.sign.detached(canonicalGroupGovBytes(args), signingSecretKey);
+  const sig = vault.sign(signingSecretKey, canonicalGroupGovBytes(args));
   return encodeBase64(sig);
 }
 
@@ -213,9 +215,9 @@ export function verifyGroupGovernance(
 /** Sign v2 canonical bytes with an Ed25519 signing secret key; returns Base64. */
 export function signGroupMetadataV2(
   args: { groupId: string; groupName: string; rosterHash: string; rosterVersion: number; createdAt: number },
-  signingSecretKey: Uint8Array,
+  signingSecretKey: VaultKey,
 ): string {
-  const sig = nacl.sign.detached(canonicalGroupBytesV2(args), signingSecretKey);
+  const sig = vault.sign(signingSecretKey, canonicalGroupBytesV2(args));
   return encodeBase64(sig);
 }
 
@@ -269,9 +271,9 @@ export function canonicalGroupDissolveBytes(args: {
 /** Sign a group-dissolution marker with the admin's Ed25519 signing secret key. */
 export function signGroupDissolve(
   args: { groupId: string; adminId: string; createdAt: number },
-  signingSecretKey: Uint8Array,
+  signingSecretKey: VaultKey,
 ): string {
-  const sig = nacl.sign.detached(canonicalGroupDissolveBytes(args), signingSecretKey);
+  const sig = vault.sign(signingSecretKey, canonicalGroupDissolveBytes(args));
   return encodeBase64(sig);
 }
 

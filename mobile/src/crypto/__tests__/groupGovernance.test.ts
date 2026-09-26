@@ -14,6 +14,7 @@ import {
   can,
   effectivePermissions,
 } from '../groupRoles';
+import { vk } from './helpers/rawIdentity';
 
 const OWNER = 'AAA-BBBB-CCCC';
 const ADMIN = 'DDD-EEEE-FFFF';
@@ -40,7 +41,7 @@ describe('governance signature (aegis.group.gov.v1)', () => {
   it('round-trips: a signature by the owner verifies against the owner pubkey', () => {
     const kp = nacl.sign.keyPair();
     const args = govArgs();
-    const sig = signGroupGovernance(args, kp.secretKey);
+    const sig = signGroupGovernance(args, vk(kp.secretKey));
     expect(verifyGroupGovernance(args, sig, encodeBase64(kp.publicKey))).toBe(true);
   });
 
@@ -48,7 +49,7 @@ describe('governance signature (aegis.group.gov.v1)', () => {
     const kp = nacl.sign.keyPair();
     const sig = signGroupGovernance(
       govArgs({ admins: [ADMIN, 'ZZZ-ZZZZ-ZZZZ'], moderators: [MOD, 'YYY-YYYY-YYYY'] }),
-      kp.secretKey,
+      vk(kp.secretKey),
     );
     // Same sets, reversed insertion order → still verifies (canonical sort).
     const verified = verifyGroupGovernance(
@@ -61,7 +62,7 @@ describe('governance signature (aegis.group.gov.v1)', () => {
 
   it('rejects a tampered permission (member promotes whoCanCall to everyone)', () => {
     const kp = nacl.sign.keyPair();
-    const sig = signGroupGovernance(govArgs(), kp.secretKey);
+    const sig = signGroupGovernance(govArgs(), vk(kp.secretKey));
     // whoCanCall is 'admins' by default (see groupRoles.ts DEFAULT_PERMISSIONS),
     // so promoting it to 'everyone' is a genuine change to the signed permission
     // set — verification against the original signature must fail.
@@ -75,7 +76,7 @@ describe('governance signature (aegis.group.gov.v1)', () => {
     const kp = nacl.sign.keyPair();
     // v2 demotes ADMIN to a plain member.
     const current = govArgs({ admins: [], govVersion: 2 });
-    const sig = signGroupGovernance(current, kp.secretKey);
+    const sig = signGroupGovernance(current, vk(kp.secretKey));
     // Attacker replays the signature but claims the old (v1) admin set.
     const replay = govArgs({ admins: [ADMIN], govVersion: 1 });
     expect(verifyGroupGovernance(replay, sig, encodeBase64(kp.publicKey))).toBe(false);
@@ -85,7 +86,7 @@ describe('governance signature (aegis.group.gov.v1)', () => {
     const owner = nacl.sign.keyPair();
     const impostor = nacl.sign.keyPair();
     const args = govArgs();
-    const sig = signGroupGovernance(args, impostor.secretKey);
+    const sig = signGroupGovernance(args, vk(impostor.secretKey));
     expect(verifyGroupGovernance(args, sig, encodeBase64(owner.publicKey))).toBe(false);
   });
 });
@@ -98,7 +99,7 @@ describe('v1 metadata signature is untouched by the governance layer', () => {
     expect(new TextDecoder().decode(canonicalGroupBytes(meta))).toBe(
       JSON.stringify(['aegis.group.v1', 'g', 'Squad', [MEMBER, OWNER].sort(), 1000]),
     );
-    const sig = signGroupMetadata(meta, kp.secretKey);
+    const sig = signGroupMetadata(meta, vk(kp.secretKey));
     expect(verifyGroupMetadata(meta, sig, encodeBase64(kp.publicKey))).toBe(true);
   });
 });

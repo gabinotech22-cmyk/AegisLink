@@ -21,7 +21,7 @@ export interface SodiumBridge {
 /** Envelope returned by the main process for every `vault:call` (see main/crypto/vault/ops.ts). */
 export type VaultResult =
   | { ok: true; value: unknown }
-  | { ok: false; code: 'NOKEY' | 'REJECTED' | 'BAD_ARG' | 'FAIL'; message: string };
+  | { ok: false; code: 'NOKEY' | 'REJECTED' | 'BAD_ARG' | 'DENIED' | 'FAIL'; message: string };
 
 export interface VaultBridge {
   /** Synchronous (ipcRenderer.sendSync), like `sodium.call`. */

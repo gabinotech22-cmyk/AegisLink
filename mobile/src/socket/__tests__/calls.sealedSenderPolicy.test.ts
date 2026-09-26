@@ -110,8 +110,8 @@ jest.mock('../../store/identity', () => ({
     getState: () => ({
       identity: {
         aegisId: 'self-aegis-id',
-        secretKey: new Uint8Array(32),
-        signingSecretKey: new Uint8Array(64),
+        secretKey: require('../../crypto/__tests__/helpers/rawIdentity').testBoxKey(),
+        signingSecretKey: require('../../crypto/__tests__/helpers/rawIdentity').testSignKey(),
       },
     }),
   },

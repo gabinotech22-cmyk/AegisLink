@@ -19,6 +19,7 @@ import {
   sealWithCallKey,
   openWithCallKey,
 } from '../callSession';
+import { vk } from './helpers/rawIdentity';
 
 const NOW = 1_750_000_000_000;
 
@@ -33,7 +34,7 @@ describe('sealed call session (mobile)', () => {
     const { wire, callKey } = sealCallInvite(
       bob.box.publicKey,
       'AAA-BBBB-CCCC',
-      alice.sign.secretKey,
+      vk(alice.sign.secretKey),
       'sdp-offer-blob',
       NOW,
     );
@@ -43,7 +44,7 @@ describe('sealed call session (mobile)', () => {
 
     const opened = openCallInvite(
       wire,
-      bob.box.secretKey,
+      vk(bob.box.secretKey),
       (from) => (from === 'AAA-BBBB-CCCC' ? alice.sign.publicKey : null),
       NOW,
     );
@@ -57,11 +58,11 @@ describe('sealed call session (mobile)', () => {
   test('rejects a forged caller (signature by the wrong key)', () => {
     const mallory = makeActor();
     const bob = makeActor();
-    const { wire } = sealCallInvite(bob.box.publicKey, 'AAA-BBBB-CCCC', mallory.sign.secretKey, 'x', NOW);
+    const { wire } = sealCallInvite(bob.box.publicKey, 'AAA-BBBB-CCCC', vk(mallory.sign.secretKey), 'x', NOW);
     const alice = makeActor();
     const opened = openCallInvite(
       wire,
-      bob.box.secretKey,
+      vk(bob.box.secretKey),
       (from) => (from === 'AAA-BBBB-CCCC' ? alice.sign.publicKey : null),
       NOW,
     );
@@ -71,8 +72,8 @@ describe('sealed call session (mobile)', () => {
   test('answer/ICE round-trip under the session key', () => {
     const alice = makeActor();
     const bob = makeActor();
-    const { wire, callKey } = sealCallInvite(bob.box.publicKey, 'AAA-BBBB-CCCC', alice.sign.secretKey, 'o', NOW);
-    const opened = openCallInvite(wire, bob.box.secretKey, () => alice.sign.publicKey, NOW)!;
+    const { wire, callKey } = sealCallInvite(bob.box.publicKey, 'AAA-BBBB-CCCC', vk(alice.sign.secretKey), 'o', NOW);
+    const opened = openCallInvite(wire, vk(bob.box.secretKey), () => alice.sign.publicKey, NOW)!;
 
     // Callee → caller answer, sealed under the shared key.
     const ans = sealWithCallKey(opened.callKey, 'sdp-answer-blob');

@@ -88,6 +88,32 @@ describe('key vault', () => {
     expect(() => vault.load('panic', blob)).toThrow(VaultBlobRejectedError);
   });
 
+  it('exportSecret gives the raw key back (explicit exports only), not for a locked profile', async () => {
+    await vault.unlock('self');
+    const xsk = rand(32);
+    const { key } = vault.import('self', 'x25519', xsk.slice());
+    expect(vault.exportSecret(key)).toEqual(xsk);
+    const { key: e } = vault.deriveEd25519(key);
+    expect(vault.exportSecret(e)).toEqual(tweetnacl.sign.keyPair.fromSeed(xsk).secretKey);
+    vault.lock('self');
+    expect(() => vault.exportSecret(key)).toThrow(VaultKeyUnavailableError);
+  });
+
+  it('copy moves a key into another profile: same key, a blob only that profile loads', async () => {
+    await vault.unlock('self');
+    await vault.unlock('work');
+    const xsk = rand(32);
+    const peer = tweetnacl.box.keyPair();
+    const { key } = vault.import('self', 'x25519', xsk.slice());
+    const { key: moved, blob } = vault.copy(key, 'work');
+    expect(moved.slot).toBe('work');
+    expect(moved.publicKey).toEqual(key.publicKey);
+    expect(vault.scalarMult(moved, peer.publicKey)).toEqual(tweetnacl.scalarMult(xsk, peer.publicKey));
+    expect(vault.load('work', blob).type).toBe('x25519');
+    expect(() => vault.load('self', blob)).toThrow(VaultBlobRejectedError);
+    expect(() => vault.copy(key, 'nowhere')).toThrow(VaultKeyUnavailableError);
+  });
+
   it('refuses wrong key types, sizes and slot names', async () => {
     await vault.unlock('self');
     const { key: x } = vault.generate('self', 'x25519');

@@ -10,10 +10,23 @@ const SS_OPTS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
 };
 import { createIdentity, identityFromStored, type Identity } from '../crypto/identity';
-import { loadIdentity, saveIdentity } from '../db/local';
+import { vault } from '../crypto/sodium/vault';
+import { loadIdentity, saveIdentity, type StoredIdentity } from '../db/local';
 import { ensureRegistered } from '../crypto/ensureRegistered';
 import { toRelativeMediaPath, toAbsoluteMediaUri } from '../utils/mediaPaths';
 import { themedAlert } from '../components/AlertHost';
+
+/** What saveIdentity persists for an identity: public halves + its keys as vault blobs (F-1b). */
+function storedFrom(identity: Identity): StoredIdentity {
+  return {
+    aegisId: identity.aegisId,
+    publicKeyB64: identity.publicKeyB64,
+    secretKeyStored: identity.secretKeyStored,
+    signingPublicKeyB64: identity.signingPublicKeyB64,
+    signingSecretKeyStored: identity.signingSecretKeyStored,
+    createdAt: identity.createdAt,
+  };
+}
 
 /** Publication status of this identity on the relay. */
 export type PublishStatus = 'unknown' | 'publishing' | 'published' | 'failed';
@@ -263,13 +276,15 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         // dead giveaway that duress mode exists.
         const { getOrCreateDecoyBlob } = require('./duressDecoy') as typeof import('./duressDecoy');
         const { identity: decoy } = await getOrCreateDecoyBlob();
+        // The decoy's raw keys go into the vault like any identity's (never persisted as blobs).
+        await vault.unlock('self');
         const decoyIdentity: Identity = identityFromStored({
           publicKeyB64: decoy.publicKeyB64,
-          secretKeyB64: decoy.secretKeyB64,
+          secretKeyStored: decoy.secretKeyB64,
           signingPublicKeyB64: decoy.signingPublicKeyB64,
-          signingSecretKeyB64: decoy.signingSecretKeyB64,
+          signingSecretKeyStored: decoy.signingSecretKeyB64,
           createdAt: decoy.createdAt,
-        });
+        }, 'self');
         set({
           identity: decoyIdentity,
           activeSlotId: 'self',
@@ -315,7 +330,14 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         set({ identity: null, activeSlotId, slotsList, status: 'idle', hydrated: true });
         return;
       }
-      const identity = identityFromStored(stored);
+      // The profile's KEK goes from the OS keystore into the vault; the
+      // identity keys load as handles. Keys stored before F-1b are imported
+      // once here and re-persisted as vault blobs (the raw copies are replaced).
+      await vault.unlock(activeSlotId);
+      const identity = identityFromStored(stored, activeSlotId);
+      if (identity.secretKeyStored !== stored.secretKeyStored || identity.signingSecretKeyStored !== stored.signingSecretKeyStored) {
+        await saveIdentity(storedFrom(identity));
+      }
 
       // Parallelize all five independent SecureStore reads (profile + published flag).
       const [
@@ -381,17 +403,11 @@ export const useIdentity = create<IdentityState>((set, get) => ({
   async generate() {
     set({ status: 'generating', error: null });
     try {
-      const identity = createIdentity();
-      await saveIdentity({
-        aegisId: identity.aegisId,
-        publicKeyB64: identity.publicKeyB64,
-        secretKeyB64: identity.secretKeyB64,
-        signingPublicKeyB64: identity.signingPublicKeyB64,
-        signingSecretKeyB64: identity.signingSecretKeyB64,
-        createdAt: identity.createdAt,
-      });
-
       const activeSlotId = get().activeSlotId || 'self';
+      await vault.unlock(activeSlotId);
+      const identity = createIdentity(activeSlotId);
+      await saveIdentity(storedFrom(identity));
+
       const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');
       const defaultColor = '#05b875';
       await SecureStore.setItemAsync(getPrefKey('aegis.displayName', activeSlotId), defaultName, SS_OPTS);
@@ -584,22 +600,16 @@ export const useIdentity = create<IdentityState>((set, get) => ({
       }
       const newSlotId = `slot_${nextSlotNum}`;
 
-      // Create identity for the new slot
-      const identity = createIdentity();
+      // Create identity for the new slot, in that slot's vault profile
+      await vault.unlock(newSlotId);
+      const identity = createIdentity(newSlotId);
 
       // Temporarily set active slot in db to the new slot to save the identity in the new DB file!
       const { setActiveDbSlot } = require('../db/local');
       const prevSlot = get().activeSlotId;
       setActiveDbSlot(newSlotId);
 
-      await saveIdentity({
-        aegisId: identity.aegisId,
-        publicKeyB64: identity.publicKeyB64,
-        secretKeyB64: identity.secretKeyB64,
-        signingPublicKeyB64: identity.signingPublicKeyB64,
-        signingSecretKeyB64: identity.signingSecretKeyB64,
-        createdAt: identity.createdAt,
-      });
+      await saveIdentity(storedFrom(identity));
 
       // Save default preferences for the new slot
       const defaultName = identity.aegisId.toLowerCase().replace(/-/g, '');

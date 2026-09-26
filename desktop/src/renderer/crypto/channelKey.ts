@@ -1,4 +1,5 @@
 import { nacl } from './sodium';
+import { vault, type VaultKey } from './sodium/vault';
 import { encodeBase64, decodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-util';
 import { hmacSHA256, hkdfSHA256 } from './signal/kdf';
 
@@ -164,14 +165,14 @@ export function sealSenderKeyFor(
   channelId: string,
   senderAegisId: string,
   recipientPublicKeyB64: string,
-  senderSecretKeyB64: string
+  senderSecretKey: VaultKey
 ): SenderKeyDistributionMessage {
   const nonce = nacl.randomBytes(24);
-  const ciphertext = nacl.box(
+  const ciphertext = vault.box(
+    senderSecretKey,
     serializeSealedSenderKey(sk, senderAegisId),
     nonce,
     decodeBase64(recipientPublicKeyB64),
-    decodeBase64(senderSecretKeyB64)
   );
   return {
     channelId,
@@ -205,13 +206,13 @@ export async function sealSenderKeyForRecipients(
   sk: SenderKey,
   channelId: string,
   senderAegisId: string,
-  senderSecretKeyB64: string,
+  senderSecretKey: VaultKey,
   recipients: ReadonlyArray<{ aegisId: string; publicKeyB64: string }>
 ): Promise<Array<SenderKeyDistributionMessage & { aegisId: string }>> {
   const out: Array<SenderKeyDistributionMessage & { aegisId: string }> = [];
   for (let i = 0; i < recipients.length; i++) {
     const r = recipients[i];
-    const dist = sealSenderKeyFor(sk, channelId, senderAegisId, r.publicKeyB64, senderSecretKeyB64);
+    const dist = sealSenderKeyFor(sk, channelId, senderAegisId, r.publicKeyB64, senderSecretKey);
     out.push({ ...dist, aegisId: r.aegisId });
     if ((i + 1) % SEAL_CHUNK_SIZE === 0 && i + 1 < recipients.length) {
       await yieldToEventLoop();
@@ -231,16 +232,16 @@ export async function sealSenderKeyForRecipients(
  */
 export function openSenderKeyDistribution(
   msg: Pick<SenderKeyDistributionMessage, 'ciphertextB64' | 'nonceB64'>,
-  mySecretKeyB64: string,
+  mySecretKey: VaultKey,
   candidateSenderPublicKeyB64: string
 ): { senderKey: SenderKey; senderAegisId: string } | null {
   let opened: Uint8Array | null;
   try {
-    opened = nacl.box.open(
+    opened = vault.boxOpen(
+      mySecretKey,
       decodeBase64(msg.ciphertextB64),
       decodeBase64(msg.nonceB64),
       decodeBase64(candidateSenderPublicKeyB64),
-      decodeBase64(mySecretKeyB64)
     );
   } catch {
     return null;

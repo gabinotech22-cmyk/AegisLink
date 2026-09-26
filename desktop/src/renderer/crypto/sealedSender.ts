@@ -15,6 +15,7 @@
  */
 
 import { nacl } from './sodium';
+import { vault, type VaultKey } from './sodium/vault';
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
 import { verifyDetached } from './ed25519';
 
@@ -52,7 +53,7 @@ interface SealedInner {
 export function sealEnvelope(
   recipientBoxPublicKey: Uint8Array,
   senderAegisId: string,
-  senderSigningSecretKey: Uint8Array,
+  senderSigningSecretKey: VaultKey,
   payload: string,
   nowMs: number,
   /** First contact (F3b): embed our signing public key so the recipient can verify. */
@@ -65,7 +66,7 @@ export function sealEnvelope(
   if (senderSigningPublicKeyForFirstContact) inner.spk = encodeBase64(senderSigningPublicKeyForFirstContact);
   const innerBytes = new TextEncoder().encode(JSON.stringify(inner));
 
-  const sig = nacl.sign.detached(innerBytes, senderSigningSecretKey);
+  const sig = vault.sign(senderSigningSecretKey, innerBytes);
 
   const sealedPlain = new TextEncoder().encode(
     JSON.stringify({ i: encodeBase64(innerBytes), s: encodeBase64(sig) }),
@@ -87,7 +88,7 @@ export function sealEnvelope(
 
 export function openEnvelope(
   wire: SealedWire,
-  myBoxSecretKey: Uint8Array,
+  myBoxSecretKey: VaultKey,
   resolveSigningKey: (from: string) => Uint8Array | null,
   nowMs: number,
   /** F3b: accept an unknown sender that embeds its signing key (TOFU) — first-contact path only. */
@@ -106,7 +107,7 @@ export function openEnvelope(
   if (nonce.length !== nacl.box.nonceLength) return null;
   if (epk.length !== nacl.box.publicKeyLength) return null;
 
-  const sealedPlain = nacl.box.open(ciphertext, nonce, epk, myBoxSecretKey);
+  const sealedPlain = vault.boxOpen(myBoxSecretKey, ciphertext, nonce, epk);
   if (!sealedPlain) return null;
 
   let outer: { i: string; s: string };

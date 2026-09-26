@@ -68,6 +68,11 @@ int aegis_vault_load(uint32_t *handle, int *type, uint8_t *pub, size_t publen, c
  * derivation: sign.keyPair.fromSeed(boxSecret)). New handle, blob and pub. */
 int aegis_vault_derive_ed25519(uint32_t *handle, uint8_t *blob, size_t bloblen, uint8_t *pub, size_t publen,
                                uint32_t x_handle);
+/* The key of `src` as a new key of profile `slot` (both unlocked): new handle
+ * and a blob of `slot`. Used when a profile's identity is minted before its
+ * slot name is known (the slot is the identity's own AegisID). */
+int aegis_vault_copy(uint32_t *handle, uint8_t *blob, size_t bloblen, uint32_t src, const uint8_t *slot,
+                     size_t slotlen);
 /* Destroy one key. */
 int aegis_vault_release(uint32_t handle);
 
@@ -79,6 +84,10 @@ int aegis_vault_box(uint32_t handle, uint8_t *c, size_t clen, const uint8_t *m, 
 int aegis_vault_box_open(uint32_t handle, uint8_t *m, size_t mlen, const uint8_t *c, size_t clen,
                          const uint8_t *n, size_t nlen, const uint8_t *pk, size_t pklen);
 int aegis_vault_mlkem768_dec(uint32_t handle, uint8_t *ss, size_t sslen, const uint8_t *ct, size_t ctlen);
+
+/* The raw key of `handle` (which must be of `type`), for the explicit exports
+ * only: backup, device link and the recovery phrase (design doc section 5). */
+int aegis_vault_export(uint32_t handle, int type, uint8_t *out, size_t outlen);
 
 /* Number of live handles (tests / leak checks). */
 size_t aegis_vault_live_keys(void);

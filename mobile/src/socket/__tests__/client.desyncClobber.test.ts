@@ -180,22 +180,13 @@ jest.mock('socket.io-client', () => ({
 
 import type { Identity } from '../../crypto/identity';
 import { deriveAegisId } from '../../crypto/identity';
+import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
+import { vault } from '../../crypto/sodium/vault';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return {
-    aegisId: deriveAegisId(box.publicKey),
-    publicKey: box.publicKey,
-    secretKey: box.secretKey,
-    publicKeyB64: encodeBase64(box.publicKey),
-    secretKeyB64: encodeBase64(box.secretKey),
-    signingPublicKey: sign.publicKey,
-    signingSecretKey: sign.secretKey,
-    signingPublicKeyB64: encodeBase64(sign.publicKey),
-    signingSecretKeyB64: encodeBase64(sign.secretKey),
-    createdAt: Date.now(),
-  };
+  return identityFromRaw(box, sign);
 }
 
 /**
@@ -205,7 +196,7 @@ function buildIdentity(): Identity {
  */
 function buildDesyncedEnvelope(me: Identity, peer: Identity, createdAtMs: number) {
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, me.signingSecretKey);
+  const sig = vault.sign(me.signingSecretKey, spk.publicKey);
   const bundle = {
     identityKeyB64: me.publicKeyB64,
     signingPublicKeyB64: me.signingPublicKeyB64,
@@ -252,7 +243,7 @@ function buildDesyncedEnvelope(me: Identity, peer: Identity, createdAtMs: number
 function buildInitFromHigher(higher: Identity, me: Identity, slotSpkKey: string) {
   // `me` publishes an SPK; we stash its secret so the receiver X3DH succeeds.
   const spk = nacl.box.keyPair();
-  const sig = nacl.sign.detached(spk.publicKey, me.signingSecretKey);
+  const sig = vault.sign(me.signingSecretKey, spk.publicKey);
   mockSecure.set(slotSpkKey, encodeBase64(spk.secretKey));
   const bundle = {
     identityKeyB64: me.publicKeyB64,

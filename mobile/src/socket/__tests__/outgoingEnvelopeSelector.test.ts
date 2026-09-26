@@ -71,11 +71,11 @@ jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn(), setItemAsync: j
 import { buildOutgoingEnvelope } from '../client';
 import type { Identity } from '../../crypto/identity';
 import type { RatchetState } from '../../crypto/signal/ratchet';
+import { stubKeys } from '../../crypto/__tests__/helpers/rawIdentity';
 
 const identity = {
-  aegisId: 'self', publicKey: new Uint8Array(32), secretKey: new Uint8Array(32),
-  publicKeyB64: 'p', secretKeyB64: 's', signingPublicKey: new Uint8Array(32),
-  signingSecretKey: new Uint8Array(64), signingPublicKeyB64: 'sp', signingSecretKeyB64: 'ss', createdAt: 0,
+  aegisId: 'self', publicKey: new Uint8Array(32), ...stubKeys(),
+  publicKeyB64: 'p', signingPublicKey: new Uint8Array(32), signingPublicKeyB64: 'sp', createdAt: 0,
 } as Identity;
 
 const established = {} as RatchetState; // no x3dhInit → established

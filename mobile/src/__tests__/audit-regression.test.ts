@@ -153,7 +153,7 @@ describe('H-5 — handlePanicDeepLink rejects malformed / unsigned tokens', () =
       identity: {
         aegisId: 'AAA-AAAA-AAAA',
         publicKey: new Uint8Array(32),
-        secretKey: new Uint8Array(32),
+        secretKey: require('../crypto/__tests__/helpers/rawIdentity').testBoxKey(),
         publicKeyB64: '',
         secretKeyB64: '',
         signingPublicKey: realKp.publicKey,

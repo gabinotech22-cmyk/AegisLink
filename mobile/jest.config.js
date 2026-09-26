@@ -24,6 +24,7 @@ module.exports = {
   ],
   setupFiles: [
     './node_modules/react-native-gesture-handler/jestSetup.js',
+    './jest/vaultSetup.ts',
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   moduleNameMapper: {

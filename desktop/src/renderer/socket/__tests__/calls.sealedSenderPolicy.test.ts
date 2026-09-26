@@ -38,17 +38,12 @@ vi.mock('../../config', () => ({
 }));
 vi.mock('../../db/local', () => ({ saveCall: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../../store/messages', () => ({ useMessages: { getState: () => ({ append: vi.fn() }) } }));
-vi.mock('../../store/identity', () => ({
-  useIdentity: {
-    getState: () => ({
-      identity: {
-        aegisId: 'self-aegis-id',
-        secretKey: new Uint8Array(32),
-        signingSecretKey: new Uint8Array(64),
-      },
-    }),
-  },
-}));
+vi.mock('../../store/identity', async () => {
+  // Our identity keys as the app holds them: vault handles (F-1b).
+  const { testBoxKey, testSignKey } = await import('../../crypto/__tests__/helpers/rawIdentity');
+  const identity = { aegisId: 'self-aegis-id', secretKey: testBoxKey(), signingSecretKey: testSignKey() };
+  return { useIdentity: { getState: () => ({ identity }) } };
+});
 vi.mock('../../store/contacts', () => ({
   useContacts: { getState: () => ({ get: () => h.peerRecord }) },
 }));

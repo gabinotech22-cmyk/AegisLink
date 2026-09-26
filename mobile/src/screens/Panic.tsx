@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ss } from '../utils/secureStore';
 import { copySensitiveText } from '../utils/secureClipboard';
 import { nacl } from '../crypto/sodium';
+import { vault } from '../crypto/sodium/vault';
 import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { useTheme } from '../theme/ThemeContext';
 import { I } from '../components/icons';
@@ -104,7 +105,7 @@ export function PanicScreen({ onBack, onConfigureLock }: Props) {
     if (!identity?.signingSecretKey) return; // identity not yet hydrated — defer
     const { randomUUID } = require('expo-crypto') as typeof import('expo-crypto');
     const token = randomUUID();
-    const sigBytes = nacl.sign.detached(decodeUTF8(token), identity.signingSecretKey);
+    const sigBytes = vault.sign(identity.signingSecretKey, decodeUTF8(token));
     const sig = encodeBase64(sigBytes);
     setRemoteToken(token);
     setRemoteTokenSig(sig);

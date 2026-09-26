@@ -201,6 +201,32 @@ export class KeyVault {
     }
   }
 
+  /**
+   * The same key as a key of another (unlocked) profile: a new profile's
+   * identity is minted before its slot exists (the slot is its own AegisID).
+   */
+  copy(handle: number, slot: string): VaultKeyInfo & { blob: Uint8Array } {
+    this.requireUnlocked(slot);
+    const e = typeof handle === 'number' ? this.keys.get(handle) : undefined;
+    if (!e) throw new VaultError('NOKEY', 'key not available (locked, released or of another type)');
+    let out: (VaultKeyInfo & { blob: Uint8Array }) | null = null;
+    this.use(handle, e.type, (secret) => {
+      out = this.add(slot, e.type, secret);
+    });
+    return out as unknown as VaultKeyInfo & { blob: Uint8Array };
+  }
+
+  /**
+   * The raw key — for the explicit exports ONLY (design doc §5: encrypted
+   * backup, recovery phrase). The IPC layer asks the user in a native dialog
+   * first (`ipc/vault.ts`); the caller zeroes the copy.
+   */
+  exportSecret(handle: number, type: VaultKeyType): Uint8Array {
+    const out = new Uint8Array(KEY_LEN[type] ?? 0);
+    this.use(handle, type, (secret) => out.set(secret));
+    return out;
+  }
+
   release(handle: number): void {
     if (!this.keys.has(handle)) throw new VaultError('NOKEY', 'key released');
     this.free(handle);

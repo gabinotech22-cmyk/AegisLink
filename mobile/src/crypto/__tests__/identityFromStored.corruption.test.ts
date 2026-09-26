@@ -12,14 +12,15 @@
  * identityFromStored is the single trust boundary all stored identity data
  * passes through (db/local → store/identity.ts), so it is where the
  * integrity check belongs: fail loud on a mismatch instead of silently
- * returning a broken keypair (golden rule #1).
+ * returning a broken keypair (golden rule #1). It holds for both stored forms:
+ * vault blobs (F-1b) and raw keys stored before F-1b (migrated on load).
  */
-import nacl from 'tweetnacl';
 import { encodeBase64 } from 'tweetnacl-util';
 import { createIdentity, identityFromStored } from '../identity';
+import { rawStoredIdentity } from './helpers/rawIdentity';
 
 describe('identityFromStored — corrupted (mismatched) key material', () => {
-  it('throws when secretKeyB64 does not correspond to publicKeyB64', () => {
+  it('throws when the stored secret key does not correspond to publicKeyB64 (vault blobs)', () => {
     const a = createIdentity();
     const b = createIdentity();
 
@@ -29,25 +30,39 @@ describe('identityFromStored — corrupted (mismatched) key material', () => {
         // A completely unrelated secret key — simulates the SecureStore write
         // from a different, later saveIdentity() attempt landing while SQLite
         // still holds the earlier identity's public row.
-        secretKeyB64: b.secretKeyB64,
+        secretKeyStored: b.secretKeyStored,
         createdAt: a.createdAt,
       }),
     ).toThrow(/identity corrupted/);
   });
 
-  it('throws when signingSecretKeyB64 does not correspond to signingPublicKeyB64', () => {
+  it('throws when the stored secret key does not correspond to publicKeyB64 (raw, pre-F-1b)', () => {
+    const a = rawStoredIdentity();
+    const b = rawStoredIdentity();
+    expect(() =>
+      identityFromStored({ publicKeyB64: a.publicKeyB64, secretKeyStored: b.secretKeyStored, createdAt: a.createdAt }),
+    ).toThrow(/identity corrupted/);
+  });
+
+  it('throws when the signing secret does not correspond to signingPublicKeyB64', () => {
     const id = createIdentity();
     const other = createIdentity();
 
     expect(() =>
       identityFromStored({
         publicKeyB64: id.publicKeyB64,
-        secretKeyB64: id.secretKeyB64,
+        secretKeyStored: id.secretKeyStored,
         signingPublicKeyB64: id.signingPublicKeyB64,
         // Mismatched signing secret from an unrelated identity.
-        signingSecretKeyB64: other.signingSecretKeyB64,
+        signingSecretKeyStored: other.signingSecretKeyStored,
         createdAt: id.createdAt,
       }),
+    ).toThrow(/identity corrupted/);
+
+    const raw = rawStoredIdentity();
+    const rawOther = rawStoredIdentity();
+    expect(() =>
+      identityFromStored({ ...raw, signingSecretKeyStored: rawOther.signingSecretKeyStored }),
     ).toThrow(/identity corrupted/);
   });
 
@@ -58,59 +73,57 @@ describe('identityFromStored — corrupted (mismatched) key material', () => {
     // against those embedded bytes would miss this: patch the seed while
     // keeping the embedded public-key bytes intact and matching
     // signingPublicKeyB64, so the ONLY way to catch it is deriving from the
-    // seed itself (nacl.sign.keyPair.fromSeed) and comparing that.
-    const id = createIdentity();
-    const tamperedSecret = new Uint8Array(id.signingSecretKey);
+    // seed itself — which the vault does on import.
+    const raw = rawStoredIdentity();
+    const tamperedSecret = new Uint8Array(raw.sign.secretKey);
     tamperedSecret[0] ^= 0xff; // corrupt one byte of the seed half only
-    // Embedded public-key bytes (32..64) are left untouched — they still
-    // equal signingPublicKeyB64 — but the seed no longer derives it.
 
     expect(() =>
-      identityFromStored({
-        publicKeyB64: id.publicKeyB64,
-        secretKeyB64: id.secretKeyB64,
-        signingPublicKeyB64: id.signingPublicKeyB64,
-        signingSecretKeyB64: encodeBase64(tamperedSecret),
-        createdAt: id.createdAt,
-      }),
+      identityFromStored({ ...raw, signingSecretKeyStored: encodeBase64(tamperedSecret) }),
     ).toThrow(/identity corrupted/);
   });
 
-  it('does not throw for a genuinely consistent identity', () => {
+  it('does not throw for a genuinely consistent identity, in either stored form', () => {
     const id = createIdentity();
     expect(() =>
       identityFromStored({
         publicKeyB64: id.publicKeyB64,
-        secretKeyB64: id.secretKeyB64,
+        secretKeyStored: id.secretKeyStored,
         signingPublicKeyB64: id.signingPublicKeyB64,
-        signingSecretKeyB64: id.signingSecretKeyB64,
+        signingSecretKeyStored: id.signingSecretKeyStored,
         createdAt: id.createdAt,
       }),
     ).not.toThrow();
+    expect(() => identityFromStored(rawStoredIdentity())).not.toThrow();
   });
 
   it('does not throw when signing material is legitimately absent (derives instead)', () => {
     const id = createIdentity();
     expect(() =>
-      identityFromStored({
-        publicKeyB64: id.publicKeyB64,
-        secretKeyB64: id.secretKeyB64,
-        createdAt: id.createdAt,
-      }),
+      identityFromStored({ publicKeyB64: id.publicKeyB64, secretKeyStored: id.secretKeyStored, createdAt: id.createdAt }),
     ).not.toThrow();
   });
 
   it('sanity: a tampered publicKeyB64 (single flipped byte) is caught', () => {
     const id = createIdentity();
-    const tampered = new Uint8Array(nacl.box.keyPair.fromSecretKey(id.secretKey).publicKey);
+    const tampered = new Uint8Array(id.publicKey);
     tampered[0] ^= 0xff;
 
     expect(() =>
       identityFromStored({
         publicKeyB64: encodeBase64(tampered),
-        secretKeyB64: id.secretKeyB64,
+        secretKeyStored: id.secretKeyStored,
         createdAt: id.createdAt,
       }),
     ).toThrow(/identity corrupted/);
+  });
+
+  it('a blob of another profile is rejected, not loaded', async () => {
+    const { vault } = await import('../sodium/vault');
+    await vault.unlock('work');
+    const id = createIdentity('work');
+    expect(() =>
+      identityFromStored({ publicKeyB64: id.publicKeyB64, secretKeyStored: id.secretKeyStored, createdAt: id.createdAt }, 'self'),
+    ).toThrow(/blob rejected/);
   });
 });

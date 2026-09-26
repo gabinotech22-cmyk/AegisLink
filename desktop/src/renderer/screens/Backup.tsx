@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import i18n from '../i18n';
 import type { CSSProperties } from 'react';
@@ -27,9 +27,9 @@ import {
 import { saveContact, saveGroup, saveMessage, loadMessagesByChat, type StoredContact, type StoredGroup, type StoredMessage } from '../db/local';
 import { usePreferences } from '../store/preferences';
 import { WORDLIST_256 } from '../crypto/wordlist';
-import { nacl, type BoxKeyPair, type SignKeyPair } from '../crypto/sodium';
 import { encodeBase64 } from 'tweetnacl-util';
-import { identityFromStored } from '../crypto/identity';
+import { exportIdentitySecrets, identityFromStored, importIdentity } from '../crypto/identity';
+import { vault, VaultExportDeniedError } from '../crypto/sodium/vault';
 
 interface Props {
   onBack: () => void;
@@ -71,10 +71,28 @@ export function BackupScreen({ onBack, onRestored }: Props) {
     ? `${Math.max(1, Math.floor((Date.now() - lastBackupAt) / 60000))} min ago`
     : i18n.t('backup.noBackupYetLabel');
 
-  const mnemonic = useMemo<string>(() => {
-    if (!identity?.secretKey) return '';
-    return Array.from(identity.secretKey).map((b: number) => WORDLIST_256[b]).join(' ');
-  }, [identity?.secretKey]);
+  // The recovery phrase IS the identity key: an explicit export (F-1b design
+  // doc §5). It leaves the vault only when the user reveals it and confirms in
+  // the main process's native dialog, and is dropped again on hide.
+  const [mnemonic, setMnemonic] = useState('');
+  function toggleReveal(): void {
+    if (revealed) {
+      setMnemonic('');
+      setRevealed(false);
+      return;
+    }
+    if (!identity) return;
+    let secret: Uint8Array | null = null;
+    try {
+      secret = vault.exportSecret(identity.secretKey, 'recoveryPhrase');
+      setMnemonic(Array.from(secret).map((b) => WORDLIST_256[b]).join(' '));
+      setRevealed(true);
+    } catch (e) {
+      if (!(e instanceof VaultExportDeniedError)) setError((e as Error).message);
+    } finally {
+      secret?.fill(0);
+    }
+  }
 
   const strength: PassphraseStrength = ratePassphrase(passphrase);
 
@@ -100,6 +118,14 @@ export function BackupScreen({ onBack, onRestored }: Props) {
   async function buildPayload(): Promise<BackupPayload> {
     if (!identity) throw new Error('No identity loaded');
     const messages = await collectMessages();
+    // Explicit export (F-1b design doc §5), confirmed by the user in a native
+    // dialog: the backup carries the identity keys, sealed right after under
+    // the passphrase. The raw copies are zeroed.
+    const secrets = exportIdentitySecrets(identity, 'backup');
+    const secretKeyB64 = encodeBase64(secrets.secretKey);
+    const signingSecretKeyB64 = encodeBase64(secrets.signingSecretKey);
+    secrets.secretKey.fill(0);
+    secrets.signingSecretKey.fill(0);
     // Same payload as mobile (crypto/backup.ts): contacts with every persisted
     // field, groups with their signed governance, data preferences.
     return {
@@ -108,9 +134,9 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       identity: {
         aegisId: identity.aegisId,
         publicKeyB64: identity.publicKeyB64,
-        secretKeyB64: identity.secretKeyB64,
+        secretKeyB64,
         signingPublicKeyB64: identity.signingPublicKeyB64,
-        signingSecretKeyB64: identity.signingSecretKeyB64,
+        signingSecretKeyB64,
         createdAt: identity.createdAt,
       },
       profile: {
@@ -204,13 +230,16 @@ export function BackupScreen({ onBack, onRestored }: Props) {
       resetPassphrase();
       // The payload used to be decrypted and then dropped — "Account restored"
       // with nothing written. Now: identity, profile, contacts, groups, prefs.
+      // The keys go into the vault (same integrity checks as a load) and persist as blobs.
+      const slot = useIdentity.getState().activeSlotId || 'self';
+      await vault.unlock(slot);
       await useIdentity.getState().linkDevice(identityFromStored({
         publicKeyB64: payload.identity.publicKeyB64,
-        secretKeyB64: payload.identity.secretKeyB64,
+        secretKeyStored: payload.identity.secretKeyB64,
         signingPublicKeyB64: payload.identity.signingPublicKeyB64,
-        signingSecretKeyB64: payload.identity.signingSecretKeyB64,
+        signingSecretKeyStored: payload.identity.signingSecretKeyB64,
         createdAt: payload.identity.createdAt,
-      }));
+      }, slot));
       await useIdentity.getState().updateProfile(payload.profile.displayName, payload.profile.avatarColor, payload.profile.avatarImage);
       if (payload.profile.profileStatus) await useIdentity.getState().updateStatus(payload.profile.profileStatus);
       for (const ct of payload.contacts) {
@@ -315,7 +344,7 @@ export function BackupScreen({ onBack, onRestored }: Props) {
             {revealed ? mnemonic : '●●●● '.repeat(16)}
           </span>
           <button
-            onClick={() => setRevealed((v) => !v)}
+            onClick={toggleReveal}
             style={{
               padding: '6px 12px', fontFamily: t.fontMono, fontSize: 10, color: t.text,
               backgroundColor: 'transparent', border: `1px solid ${t.borderStrong}`,
@@ -357,25 +386,17 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                     }
                   }
                   let secretKeyBytes: Uint8Array | null = null;
-                  let keypair: BoxKeyPair | null = null;
-                  let signKeys: SignKeyPair | null = null;
                   try {
                     const bytes = words.map((w) => {
                       const idx = WORDLIST_256.indexOf(w);
                       if (idx === -1) throw new Error(`Palabra no encontrada en el diccionario: ${w}`);
                       return idx;
                     });
+                    // The 32 words are the X25519 secret; the signing key derives from it, in the vault.
                     secretKeyBytes = new Uint8Array(bytes);
-                    keypair = nacl.box.keyPair.fromSecretKey(secretKeyBytes);
-                    signKeys = nacl.sign.keyPair.fromSeed(secretKeyBytes);
-
-                    const restored = identityFromStored({
-                      publicKeyB64: encodeBase64(keypair.publicKey),
-                      secretKeyB64: encodeBase64(keypair.secretKey),
-                      signingPublicKeyB64: encodeBase64(signKeys.publicKey),
-                      signingSecretKeyB64: encodeBase64(signKeys.secretKey),
-                      createdAt: Date.now(),
-                    });
+                    const slot = useIdentity.getState().activeSlotId || 'self';
+                    await vault.unlock(slot);
+                    const restored = importIdentity(slot, secretKeyBytes, null, Date.now());
 
                     await useIdentity.getState().linkDevice(restored);
 
@@ -388,8 +409,6 @@ export function BackupScreen({ onBack, onRestored }: Props) {
                     window.alert(i18n.t('backup.errorAlRecuperarIdentidad2', { v0: (e as Error).message }));
                   } finally {
                     secretKeyBytes?.fill(0);
-                    keypair?.secretKey.fill(0);
-                    signKeys?.secretKey.fill(0);
                   }
                 }}
                 style={{ flex: 1, padding: '10px 0', backgroundColor: t.accent, border: 'none', borderRadius: t.radiusS, cursor: 'pointer', fontFamily: t.font, fontWeight: '600', color: t.accentInk, fontSize: 13 }}

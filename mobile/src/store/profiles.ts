@@ -15,7 +15,8 @@
 
 import { create } from 'zustand';
 import { ss } from '../utils/secureStore';
-import { createIdentity, type Identity } from '../crypto/identity';
+import { createIdentity, moveIdentity, type Identity } from '../crypto/identity';
+import { vault } from '../crypto/sodium/vault';
 import {
   secretKeySlot,
   signSecretKeySlot,
@@ -192,8 +193,16 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     // 1. Use the wizard's already-previewed identity (so the AegisID/identicon
     //    shown during creation is the one that gets persisted); mint a fresh one
     //    only when no caller supplied it.
-    const identity = presetIdentity ?? createIdentity();
-    const slotId = identity.aegisId;
+    //    The profile's slot is its own AegisID, known only once the key exists:
+    //    the identity is minted in the active profile's vault and copied into
+    //    the new profile's (its blobs are then readable only there).
+    const { useIdentity } = require('./identity') as typeof import('./identity');
+    const activeVaultSlot = useIdentity.getState().activeSlotId ?? 'self';
+    await vault.unlock(activeVaultSlot);
+    const draft = presetIdentity ?? createIdentity(activeVaultSlot);
+    const slotId = draft.aegisId;
+    await vault.unlock(slotId);
+    const identity = moveIdentity(draft, slotId);
     const finalName = displayName || identity.aegisId.slice(0, 8).toLowerCase();
 
     // 2. Temporarily switch DB to the new slot to initialise the schema.
@@ -201,8 +210,8 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     setActiveDbSlot(slotId);
 
     // 3. Persist keys to SecureStore under per-slot names.
-    await ss.set(secretKeySlot(slotId), identity.secretKeyB64);
-    await ss.set(signSecretKeySlot(slotId), identity.signingSecretKeyB64);
+    await ss.set(secretKeySlot(slotId), identity.secretKeyStored);
+    await ss.set(signSecretKeySlot(slotId), identity.signingSecretKeyStored);
     // Generate and store the per-profile DB encryption key.
     const dbKey = nacl.randomBytes(32);
     await ss.set(dbEncKeySlot(slotId), encodeBase64(dbKey));
@@ -211,9 +220,9 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
     await saveIdentity({
       aegisId: identity.aegisId,
       publicKeyB64: identity.publicKeyB64,
-      secretKeyB64: identity.secretKeyB64,
+      secretKeyStored: identity.secretKeyStored,
       signingPublicKeyB64: identity.signingPublicKeyB64,
-      signingSecretKeyB64: identity.signingSecretKeyB64,
+      signingSecretKeyStored: identity.signingSecretKeyStored,
       createdAt: identity.createdAt,
     });
 

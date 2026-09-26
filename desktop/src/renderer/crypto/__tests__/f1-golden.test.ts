@@ -17,6 +17,7 @@ import { nacl, sha256, sha512, hmacSha256, hkdfSha256 } from '../sodium';
 import { ratchetDecrypt, type RatchetState } from '../signal/ratchet';
 import { serializeRatchetState, reviveRatchetState } from '../../socket/ratchetSerde';
 import { openEnvelope, type SealedWire } from '../sealedSender';
+import { vk } from './helpers/rawIdentity';
 
 const FIXTURE = path.resolve(__dirname, '../../../../../mobile/src/crypto/__tests__/fixtures/f1-golden.json');
 const b64 = encodeBase64;
@@ -118,7 +119,7 @@ describe('F-1 golden fixtures (pre-libsodium output must stay valid)', () => {
     const s = golden.sealed;
     const recipient = nacl.box.keyPair.fromSecretKey(unb64(s.recipientSeed));
     const sender = nacl.sign.keyPair.fromSeed(unb64(s.senderSeed));
-    const opened = openEnvelope(s.wire, recipient.secretKey, (from) => (from === s.senderId ? sender.publicKey : null), s.nowMs);
+    const opened = openEnvelope(s.wire, vk(recipient.secretKey), (from) => (from === s.senderId ? sender.publicKey : null), s.nowMs);
     expect(opened).not.toBeNull();
     expect(opened!.from).toBe(s.senderId);
     expect(opened!.payload).toBe(s.payload);

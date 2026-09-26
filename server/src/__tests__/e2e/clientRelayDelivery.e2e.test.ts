@@ -67,12 +67,16 @@ import { encryptMessage, tryDecryptMessage } from '../../../../mobile/src/crypto
 // is not a realistic test subject, and a local reimplementation would silently
 // drift from the 3-4-4 Crockford format the relay validates.
 import { deriveAegisId } from '../../../../mobile/src/crypto/aegisId';
+// F-1b: the app holds its identity key as a key-vault handle, not bytes.
+import { vault, type VaultKey } from '../../../../mobile/src/crypto/sodium/vault';
 
 const { encodeBase64, decodeBase64 } = naclUtil;
 
 interface Party {
   aegisId: string;
   box: nacl.BoxKeyPair;
+  /** The same X25519 secret in the vault, as the app's messaging code takes it. */
+  boxKey: VaultKey;
   sign: nacl.SignKeyPair;
   deviceId: string;
 }
@@ -80,7 +84,8 @@ interface Party {
 function makeParty(deviceId: string): Party {
   const box = nacl.box.keyPair();
   const sign = nacl.sign.keyPair();
-  return { aegisId: deriveAegisId(box.publicKey), box, sign, deviceId };
+  const boxKey = vault.import('self', 'x25519', box.secretKey.slice()).key;
+  return { aegisId: deriveAegisId(box.publicKey), box, boxKey, sign, deviceId };
 }
 
 // ── Registration (PoW-gated, exactly as the app does it) ──────────────────────
@@ -147,6 +152,7 @@ let request: SuperAgent;
 let alice: Party;
 
 beforeAll(async () => {
+  await vault.unlock('self');
   await initDb();
   const app = express();
   app.use(express.json());
@@ -280,7 +286,7 @@ describe('E2E — offline send survives to a real reconnect (the #421/#423 class
       JSON.stringify({ type: 'text', text: 'sent while you were away' }),
       alice.aegisId,
       bob.box.publicKey,
-      alice.box.secretKey,
+      alice.boxKey,
       aliceSession,
     );
 
@@ -302,7 +308,7 @@ describe('E2E — offline send survives to a real reconnect (the #421/#423 class
     const opened = tryDecryptMessage(
       { ciphertextB64: b.envelopes[0].ciphertext, nonceB64: b.envelopes[0].nonce },
       alice.box.publicKey,
-      bob.box.secretKey,
+      bob.boxKey,
       bobSession,
     );
     expect(opened).not.toBeNull();
@@ -328,7 +334,7 @@ describe('E2E — at-least-once: the relay keeps the message until the client ac
     const a = await connectAuthed(alice);
     const { envelope } = encryptMessage(
       JSON.stringify({ type: 'text', text: 'ack me' }),
-      alice.aegisId, bob.box.publicKey, alice.box.secretKey, aliceSession,
+      alice.aegisId, bob.box.publicKey, alice.boxKey, aliceSession,
     );
     await emitEnvelope(a.sock, {
       id: 'msg-ack-1', to: bob.aegisId,
@@ -379,7 +385,7 @@ describe('E2E — the ratchet advances across a real relay round trip', () => {
     for (let i = 0; i < texts.length; i++) {
       const r = encryptMessage(
         JSON.stringify({ type: 'text', text: texts[i] }),
-        alice.aegisId, bob.box.publicKey, alice.box.secretKey, aliceSession,
+        alice.aegisId, bob.box.publicKey, alice.boxKey, aliceSession,
       );
       aliceSession = r.newState; // the app persists this between sends
       const ack = await emitEnvelope(a.sock, {
@@ -397,7 +403,7 @@ describe('E2E — the ratchet advances across a real relay round trip', () => {
     for (const env of b.envelopes) {
       const r = tryDecryptMessage(
         { ciphertextB64: env.ciphertext, nonceB64: env.nonce },
-        alice.box.publicKey, bob.box.secretKey, bobSession,
+        alice.box.publicKey, bob.boxKey, bobSession,
       );
       expect(r).not.toBeNull();
       bobSession = r!.newState; // the app persists the advanced state per message

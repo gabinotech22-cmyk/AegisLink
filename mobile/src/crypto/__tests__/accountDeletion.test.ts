@@ -25,7 +25,7 @@ function makeIdentity(): { identity: Identity; signingPublicKey: Uint8Array } {
   const sign = nacl.sign.keyPair();
   const identity = {
     aegisId: AEGIS_ID,
-    signingSecretKey: sign.secretKey,
+    signingSecretKey: require('./helpers/rawIdentity').vk(sign.secretKey),
     signingPublicKeyB64: encodeBase64(sign.publicKey),
   } as unknown as Identity;
   return { identity, signingPublicKey: sign.publicKey };

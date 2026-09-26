@@ -264,6 +264,12 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
   const boxed = nacl.box(msg, nonce, xpk, peer.secretKey);
   call('vault_box_open', ['$hx', `#${msg.length}`, boxed, nonce, peer.publicKey], expectBytes(msg));
   call('vault_scalarmult', ['$he', '#32', peer.publicKey], expectRc(ENOKEY)); // an Ed25519 handle is not an X25519 key
+  // Explicit export (backup / device link / recovery phrase): the raw key, only for the declared type.
+  call('vault_export', ['$hx', le32(1), '#32'], expectBytes(xsk));
+  call('vault_export', ['$he', le32(2), '#64'], expectBytes(ed.secretKey));
+  call('vault_export', ['$he', le32(1), '#32'], expectRc(ENOKEY)); // declared type must match the handle
+  call('vault_export', ['$hx', le32(1), '#31'], expectRc(EBADLEN));
+  call('vault_export', ['$hx', le32(9), '#32'], expectRc(EBADLEN));
 
   // A blob reloads into a new handle that does the same thing.
   call('vault_load', ['#4=hx2', '#4', '#32', slot, '$bx'], (rc, [, type, pub]) =>
@@ -300,6 +306,15 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
   const work = enc.encode('work');
   call('vault_unlock', [work, rand(32)], expectRc(OK));
   call('vault_load', ['#4', '#4', '#32', work, '$bx'], expectRc(EVERIFY)); // another profile's KEK
+  // Copy into another profile: same key (same DH / signature), a blob of THAT profile only.
+  call('vault_copy', ['#4=hxw', `#${blobLen(work, 32)}=bxw`, '$hx', work], expectRc(OK));
+  call('vault_scalarmult', ['$hxw', '#32', peer.publicKey], expectBytes(nacl.scalarMult(xsk, peer.publicKey)));
+  call('vault_copy', ['#4=hew', `#${blobLen(work, 64)}`, '$he', work], expectRc(OK));
+  call('vault_sign', ['$hew', '#64', msg], expectBytes(nacl.sign.detached(msg, ed.secretKey)));
+  call('vault_load', ['#4', '#4', '#32', work, '$bxw'], expectRc(OK));
+  call('vault_load', ['#4', '#4', '#32', slot, '$bxw'], expectRc(EVERIFY));
+  call('vault_copy', ['#4', `#${blobLen(work, 32) - 1}`, '$hx', work], expectRc(EBADLEN));
+  call('vault_copy', ['#4', `#${blobLen(work, 32)}`, '$hx', enc.encode('nope')], expectRc(ENOKEY));
   call('vault_lock', [other], expectRc(OK));
   call('vault_lock', [work], expectRc(OK));
 
@@ -310,6 +325,7 @@ for (let i = 0; i < Math.min(ITER, 40); i++) {
   call('vault_lock', [slot], expectRc(OK));
   call('vault_sign', ['$he', '#64', msg], expectRc(ENOKEY));
   call('vault_mlkem768_dec', ['$hm', '#32', enc1.cipherText], expectRc(ENOKEY));
+  call('vault_export', ['$hx', le32(1), '#32'], expectRc(ENOKEY)); // locked profile: no export
   call('vault_load', ['#4', '#4', '#32', slot, '$bx'], expectRc(ENOKEY));
   call('vault_live', [], expectRc(0)); // nothing left alive
 

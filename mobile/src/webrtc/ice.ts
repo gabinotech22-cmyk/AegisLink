@@ -18,6 +18,7 @@
  */
 
 import { nacl } from '../crypto/sodium';
+import { vault } from '../crypto/sodium/vault';
 import { encodeBase64, decodeUTF8 } from 'tweetnacl-util';
 import { TURN_SERVER_URL } from '../config';
 import { homeRelayBaseUrl } from '../net/homeRelay';
@@ -120,7 +121,7 @@ export async function fetchTurnConfig(aegisId: string, forceRelay: boolean = tru
       const ts = Date.now();
       const bucket = Math.floor(ts / 30_000);
       const sig = encodeBase64(
-        nacl.sign.detached(decodeUTF8(`${id.aegisId}:turn:${bucket}`), id.signingSecretKey),
+        vault.sign(id.signingSecretKey, decodeUTF8(`${id.aegisId}:turn:${bucket}`)),
       );
       signed = { aegisId: id.aegisId, sig, ts };
     }

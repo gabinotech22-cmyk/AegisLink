@@ -140,6 +140,20 @@ export const vault = {
     return freshKey(x.slot, 'ed25519', 'deriveEd25519', (h, blob, pub) => AegisSodium.vaultDeriveEd25519(h, blob, pub, x.handle));
   },
 
+  /**
+   * The same key as a key of another (unlocked) profile. A new profile's
+   * identity is minted before its slot exists — the slot name is the
+   * identity's own AegisID — so it is created in the active profile and
+   * copied over; the caller releases the original.
+   */
+  copy(key: VaultKey, slot: string): VaultKeyWithBlob {
+    const s = slotBytes(slot);
+    const handle = new Uint8Array(4);
+    const blob = new Uint8Array(blobLen(s, key.type));
+    check(AegisSodium.vaultCopy(handle, blob, key.handle, s), 'copy');
+    return { key: { handle, slot, type: key.type, publicKey: key.publicKey }, blob };
+  },
+
   release(key: VaultKey): void {
     const rc = AegisSodium.vaultRelease(key.handle);
     if (rc !== AEGIS_OK && rc !== AEGIS_ENOKEY) check(rc, 'release');
@@ -183,6 +197,18 @@ export const vault = {
     const ss = new Uint8Array(32);
     check(AegisSodium.vaultMlkem768Dec(key.handle, ss, cipherText), 'mlkemDecapsulate');
     return ss;
+  },
+
+  /**
+   * The raw secret of `key` — the explicit exports ONLY (design doc §5):
+   * encrypted backup, device link and the recovery phrase. Every caller is on
+   * the allowlist of `crypto/__tests__/vaultExport.guard.test.ts`; the caller
+   * zeroes the copy as soon as it is used.
+   */
+  exportSecret(key: VaultKey): Uint8Array {
+    const out = new Uint8Array(KEY_LEN[key.type]);
+    check(AegisSodium.vaultExport(key.handle, TYPE_ID[key.type], out), 'export');
+    return out;
   },
 
   /** Live handles (tests and leak checks). */

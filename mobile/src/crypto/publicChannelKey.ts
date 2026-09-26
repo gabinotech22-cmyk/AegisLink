@@ -19,6 +19,7 @@
  */
 
 import { nacl, sha256, hkdfSha256, type BoxKeyPair } from './sodium';
+import { vault, type VaultKey } from './sodium/vault';
 import naclUtil from 'tweetnacl-util';
 import { verifyDetached } from './ed25519';
 
@@ -430,11 +431,11 @@ export function buildPostSignedInput(channelId: string, p: ChannelPostInner): Ui
 export function signPost(
   channelId: string,
   post: ChannelPostInner,
-  senderEd25519Secret: Uint8Array
+  senderEd25519Secret: VaultKey
 ): Uint8Array {
   const input = buildPostSignedInput(channelId, post);
   const labeled = concat([POST_LABEL, input]);
-  return nacl.sign.detached(labeled, senderEd25519Secret);
+  return vault.sign(senderEd25519Secret, labeled);
 }
 
 /** Verify a post signature. */
@@ -483,7 +484,7 @@ export function verifyChainLink(
 export function sealChannelPost(
   channelId: string,
   post: ChannelPostInner,
-  senderEd25519Secret: Uint8Array,
+  senderEd25519Secret: VaultKey,
   cek: Uint8Array
 ): { ciphertextB64: string; nonceB64: string; postHash: Uint8Array } {
   const sig = signPost(channelId, post, senderEd25519Secret);
