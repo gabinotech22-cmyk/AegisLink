@@ -79,15 +79,15 @@
     <tr><td>Registros de acceso, registros de IP, horas de inicio de sesión</td><td><strong>No se registran</strong>, por configuración y por diseño (<code>access_log off</code>; la aplicación no guarda registros de acceso por usuario).</td></tr>
     <tr><td>Registros de frecuencia de mensajes / de análisis de tráfico</td><td><strong>No se almacenan.</strong> Además, los mensajes se rellenan hasta tamaños fijos por tramos, así que incluso los textos cifrados almacenados filtran una información mínima.</td></tr>
     <tr><td>Datos de ubicación</td><td><strong>Nunca se recopilan.</strong> La app no pide permisos de ubicación.</td></tr>
-    <tr><td>Información de pago</td><td><strong>No aplica.</strong> Sin cuentas, sin datos de facturación vinculados a identidades.</td></tr>
+    <tr><td>Información de pago</td><td><strong>No aplica.</strong> La app es gratuita y no tiene pagos ni cuentas; las donaciones voluntarias se hacen en una página web externa y no se vinculan a ninguna identidad.</td></tr>
   </table></div>
   <h2>Lo que SÍ tenemos (lista completa)</h2>
   <p>Ser honestos sobre lo que queda importa más que un mensaje de marketing impecable:</p>
   <ul>
     <li><strong>Material de clave pública</strong>: claves públicas de identidad, prekeys firmadas y prekeys de un solo uso que publican los dispositivos para que otros puedan iniciar sesiones cifradas. Es material criptográfico público por diseño.</li>
     <li><strong>Sobres cifrados no entregados</strong>: textos cifrados opacos en cola para destinatarios sin conexión, que se eliminan al entregarse. No podemos leerlos.</li>
-    <li><strong>Tokens de push</strong>: un token de FCM/APNs por cada dispositivo que quiera recibir notificaciones de activación. El contenido del push nunca incluye contenido ni la identidad del remitente — es un "despierta" genérico. El token lo guarda la infraestructura de Google/Apple, como en cualquier app que use push.</li>
-    <li><strong>Datos de conexión transitorios</strong>: como cualquier servidor de Internet, el relay ve la dirección IP de un cliente conectado <em>en el momento de la conexión</em>. No la registramos ni la asociamos a identidades. Los usuarios cuyo modelo de amenazas incluya la observación a nivel de red deberían conectarse a través de Tor o de una VPN.</li>
+    <li><strong>Tokens de push</strong>: un token de push de Apple (APNs) o de Google (FCM), entregado directamente o a través del servicio push de Expo, por cada dispositivo que quiera recibir notificaciones de activación. El contenido del push nunca incluye contenido ni la identidad del remitente — es un "despierta" genérico. El token lo guarda la infraestructura de Google/Apple, como en cualquier app que use push.</li>
+    <li><strong>Datos de conexión transitorios</strong>: la app llega al relay a través de Tor, así que el relay ve un circuito de Tor y no la dirección IP del usuario. Nuestros servidores sí ven la IP de las peticiones que llegan por internet normal (como las visitas a esta web) y, durante una llamada, la de los dispositivos que usan nuestro servidor TURN, <em>solo mientras dura la petición o la llamada</em>. Se guarda en memoria para limitar abusos, no se escribe en registros de acceso y nunca se asocia a una identidad.</li>
   </ul>
   <h2>Nuestros compromisos</h2>
   <ul>
@@ -98,7 +98,7 @@
   </ul>
   <h2>Verifica, no confíes</h2>
   <p>Cada afirmación de esta página se puede comprobar en el código fuente: el relay (<code>server/</code>), la capa de eliminación de metadatos y relleno (<code>mobile/src/crypto/metadata.ts</code>) y el documento del protocolo (<a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>). Si encuentras una discrepancia entre esta página y el código, es un problema de seguridad — repórtalo a través de <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md">SECURITY.md</a>.</p>
-  <p class="note">Contacto para requerimientos legales: <a href="mailto:gabinotech22@gmail.com">gabinotech22@gmail.com</a></p>
+  <p class="note">Contacto para requerimientos legales: <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a></p>
   </main>
 
   <main data-l="en">
@@ -118,15 +118,15 @@
     <tr><td>Access logs, IP logs, login timestamps</td><td><strong>Not logged</strong>, by configuration and by design (<code>access_log off</code>; the application keeps no per-user access records).</td></tr>
     <tr><td>Message frequency / traffic analysis records</td><td><strong>Not stored.</strong> Additionally, messages are padded to fixed size buckets, so even stored ciphertexts leak minimal information.</td></tr>
     <tr><td>Location data</td><td><strong>Never collected.</strong> The app does not request location permissions.</td></tr>
-    <tr><td>Payment information</td><td><strong>Not applicable.</strong> No accounts, no billing data tied to identities.</td></tr>
+    <tr><td>Payment information</td><td><strong>Not applicable.</strong> The app is free and has no payments or accounts; voluntary donations are made on an external web page and are not linked to any identity.</td></tr>
   </table></div>
   <h2>What we DO have (complete list)</h2>
   <p>Being honest about the residue matters more than a clean marketing claim:</p>
   <ul>
     <li><strong>Public key material</strong>: identity public keys, signed prekeys and one-time prekeys published by devices so others can initiate encrypted sessions. This is public-by-design cryptographic material.</li>
     <li><strong>Undelivered encrypted envelopes</strong>: opaque ciphertexts queued for offline recipients, deleted on delivery. We cannot read them.</li>
-    <li><strong>Push tokens</strong>: an FCM/APNs token per device that wants wake-up notifications. The push payload never contains content or sender identity — it is a generic "wake up". The token is held by Google/Apple infrastructure as with any app that uses push.</li>
-    <li><strong>Transient connection data</strong>: like any Internet server, the relay sees the IP address of a connected client <em>at the moment of connection</em>. We do not log it or associate it with identities. Users whose threat model includes network-level observation should connect through Tor or a VPN.</li>
+    <li><strong>Push tokens</strong>: an Apple (APNs) or Google (FCM) push token, delivered directly or through Expo's push service, per device that wants wake-up notifications. The push payload never contains content or sender identity — it is a generic "wake up". The token is held by Google/Apple infrastructure as with any app that uses push.</li>
+    <li><strong>Transient connection data</strong>: the app reaches the relay through Tor, so the relay sees a Tor circuit rather than the user's IP address. Our servers do see the IP address of requests that arrive over the regular internet (such as visits to this website) and, during a call, of the devices using our TURN server — <em>only while the request or call lasts</em>. It is kept in memory for rate limiting, not written to access logs, and never associated with an identity.</li>
   </ul>
   <h2>Our commitments</h2>
   <ul>
@@ -137,7 +137,7 @@
   </ul>
   <h2>Verify, don't trust</h2>
   <p>Every claim on this page is checkable in the source code: the relay (<code>server/</code>), the metadata-stripping and padding layer (<code>mobile/src/crypto/metadata.ts</code>), and the protocol document (<a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>). If you find a discrepancy between this page and the code, that is a security issue — please report it via <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md">SECURITY.md</a>.</p>
-  <p class="note">Contact for legal process: <a href="mailto:gabinotech22@gmail.com">gabinotech22@gmail.com</a></p>
+  <p class="note">Contact for legal process: <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a></p>
   </main>
 
   <main data-l="it">
@@ -158,15 +158,15 @@
     <tr><td>Log di accesso, log degli IP, orari di accesso</td><td><strong>Non registrati</strong>, per configurazione e per progettazione (<code>access_log off</code>; l'applicazione non conserva registri di accesso per utente).</td></tr>
     <tr><td>Registri sulla frequenza dei messaggi / di analisi del traffico</td><td><strong>Non conservati.</strong> Inoltre, i messaggi vengono riempiti (padding) fino a dimensioni fisse a scaglioni, quindi anche i testi cifrati conservati rivelano informazioni minime.</td></tr>
     <tr><td>Dati di posizione</td><td><strong>Mai raccolti.</strong> L'app non richiede permessi di localizzazione.</td></tr>
-    <tr><td>Informazioni di pagamento</td><td><strong>Non applicabile.</strong> Nessun account, nessun dato di fatturazione legato alle identità.</td></tr>
+    <tr><td>Informazioni di pagamento</td><td><strong>Non applicabile.</strong> L'app è gratuita e non ha pagamenti né account; le donazioni volontarie si fanno su una pagina web esterna e non sono collegate ad alcuna identità.</td></tr>
   </table></div>
   <h2>Cosa ABBIAMO (elenco completo)</h2>
   <p>Essere onesti su ciò che resta conta più di uno slogan di marketing impeccabile:</p>
   <ul>
     <li><strong>Materiale di chiave pubblica</strong>: chiavi pubbliche d'identità, prekey firmate e prekey monouso pubblicate dai dispositivi affinché altri possano avviare sessioni cifrate. È materiale crittografico pubblico per progettazione.</li>
     <li><strong>Buste cifrate non consegnate</strong>: testi cifrati opachi in coda per destinatari offline, eliminati alla consegna. Non possiamo leggerli.</li>
-    <li><strong>Token push</strong>: un token FCM/APNs per ogni dispositivo che vuole ricevere notifiche di risveglio. Il payload push non contiene mai contenuti né l'identità del mittente — è un generico "sveglia". Il token è detenuto dall'infrastruttura di Google/Apple, come per qualsiasi app che usa le notifiche push.</li>
-    <li><strong>Dati di connessione transitori</strong>: come qualsiasi server Internet, il relay vede l'indirizzo IP di un client connesso <em>al momento della connessione</em>. Non lo registriamo né lo associamo a identità. Gli utenti il cui modello di minaccia include l'osservazione a livello di rete dovrebbero connettersi tramite Tor o una VPN.</li>
+    <li><strong>Token push</strong>: un token push di Apple (APNs) o Google (FCM), consegnato direttamente o tramite il servizio push di Expo, per ogni dispositivo che vuole ricevere notifiche di risveglio. Il payload push non contiene mai contenuti né l'identità del mittente — è un generico "sveglia". Il token è detenuto dall'infrastruttura di Google/Apple, come per qualsiasi app che usa le notifiche push.</li>
+    <li><strong>Dati di connessione transitori</strong>: l'app raggiunge il relay tramite Tor, quindi il relay vede un circuito Tor e non l'indirizzo IP dell'utente. I nostri server vedono invece l'IP delle richieste che arrivano tramite internet normale (come le visite a questo sito) e, durante una chiamata, quello dei dispositivi che usano il nostro server TURN, <em>solo finché dura la richiesta o la chiamata</em>. Resta in memoria per limitare gli abusi, non viene scritto nei log di accesso e non viene mai associato a un'identità.</li>
   </ul>
   <h2>I nostri impegni</h2>
   <ul>
@@ -177,7 +177,7 @@
   </ul>
   <h2>Verifica, non fidarti</h2>
   <p>Ogni affermazione di questa pagina è verificabile nel codice sorgente: il relay (<code>server/</code>), lo strato di rimozione dei metadati e di padding (<code>mobile/src/crypto/metadata.ts</code>) e il documento del protocollo (<a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/docs/PROTOCOL.md">PROTOCOL.md</a>). Se trovi una discrepanza tra questa pagina e il codice, si tratta di un problema di sicurezza — segnalalo tramite <a href="https://github.com/gabinotech22-cmyk/AegisLink/blob/main/SECURITY.md">SECURITY.md</a>.</p>
-  <p class="note">Contatto per richieste legali: <a href="mailto:gabinotech22@gmail.com">gabinotech22@gmail.com</a></p>
+  <p class="note">Contatto per richieste legali: <a href="mailto:aegislink.report@gmail.com">aegislink.report@gmail.com</a></p>
   </main>
 
   <footer>

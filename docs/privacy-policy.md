@@ -1,7 +1,7 @@
 # AegisLink Privacy Policy
 
 **Effective date:** 2026-05-21
-**Last updated:** 2026-07-16
+**Last updated:** 2026-09-26
 
 AegisLink is a privacy-first encrypted messaging application. This policy explains exactly what data we collect, what we do not collect, and why. We have written it to be read, not to obscure.
 
@@ -9,7 +9,7 @@ AegisLink is a privacy-first encrypted messaging application. This policy explai
 
 ## 1. Who We Are
 
-AegisLink is operated by the AegisLink project (contact: see §9). The application is open-source software. The relay server infrastructure is self-hosted and does not depend on any third-party cloud provider with access to user data.
+AegisLink is operated by Starling Gabino, an individual based in Italy, who is the data controller for the data described in this policy (contact: see §12). The application is open-source software. The relay server infrastructure is self-hosted and does not depend on any third-party cloud provider with access to user data.
 
 ---
 
@@ -26,7 +26,7 @@ We collect the absolute minimum required to operate a relay-based messaging serv
 
 That is the complete list.
 
-We do not use analytics SDKs or crash-reporting services that phone home. The one external service we rely on is push delivery: wake-up notifications are routed through Expo's push service and Apple/Google push infrastructure, which receive only your push token and a generic, contentless payload ("new encrypted message" / "incoming call") — never message content, sender, recipient, or any other metadata.
+We do not use analytics SDKs or crash-reporting services that phone home. The one external service we rely on is push delivery: wake-up notifications go to Apple (APNs), either directly or through Expo's push service, and on Android to Google (FCM) through Expo's push service. Some wake-ups also pass through a push server we host ourselves (ntfy), which receives only a rotating mailbox identifier. All of them receive only your push token and a generic, contentless payload ("new encrypted message" / "incoming call") — never message content, sender, recipient, or any other metadata.
 
 ---
 
@@ -35,7 +35,7 @@ We do not use analytics SDKs or crash-reporting services that phone home. The on
 The following data is **never** collected, stored, or transmitted to our servers:
 
 - Your real name, email address, phone number, or any other personally identifying information
-- Your IP address — the relay server discards the source IP of every connection at the middleware layer before any log is written
+- Your IP address — the app reaches the relay through Tor, so the relay sees a Tor circuit, never your IP address. Requests that reach our servers over the regular internet (for example, visits to the website) are kept only in memory, briefly, for rate limiting; they are not written to access logs and are never linked to an AegisID. During a call, audio and video pass through our TURN server so the other person never sees your IP address; the TURN server necessarily sees it while the call lasts and does not log it
 - Message content — all messages are end-to-end encrypted; the relay receives only opaque ciphertext and cannot read them
 - Message metadata such as who you communicate with, how often, or message sizes
 - Your location
@@ -49,7 +49,7 @@ The following data is **never** collected, stored, or transmitted to our servers
 
 ## 4. End-to-End Encryption
 
-All messages, attachments, voice calls, and video calls are encrypted end-to-end using the Double Ratchet Algorithm (forward-secret session keys) with X3DH key agreement, implemented with the NaCl primitives of the libsodium and TweetNaCl libraries (auditable open-source cryptography).
+All messages, attachments, voice calls, and video calls are encrypted end-to-end using the Double Ratchet Algorithm (forward-secret session keys) with X3DH key agreement, implemented with libsodium (a widely used, independently audited open-source cryptography library).
 
 **Your private keys never leave your device.** They are generated on your device at setup, stored in the operating system's protected credential storage (iOS Keychain Services / Android Keystore, via `expo-secure-store`), and are never transmitted anywhere.
 
@@ -71,9 +71,9 @@ AegisLink supports user-configurable message timers. When a timer is set, messag
 
 ---
 
-## 7. Payment Privacy (Lightning Network)
+## 7. Payments and Donations
 
-AegisLink Work and optional premium features can be paid for using Bitcoin over the Lightning Network. Lightning payments are pseudonymous by design. We do not require any personal information to process a payment. We do not link payment channel information to AegisIDs. Payment receipts are validated cryptographically without storing payment metadata beyond the proof of payment itself.
+AegisLink is free and has no in-app payments, subscriptions or paid features, so we hold no payment data. Voluntary donations are made on an external web page (https://aegis-link.it/donate.html) in Monero or Bitcoin Lightning; they are not linked to your AegisID or to the app, and we ask for no personal information to receive them.
 
 We do not accept credit cards, PayPal, or any payment method that would require us to collect your name, billing address, or card number.
 
@@ -118,7 +118,3 @@ For privacy questions, data deletion requests, or security disclosures:
 
 - Email: aegislink.report@gmail.com
 - GitHub: https://github.com/gabinotech22-cmyk/AegisLink/security/advisories/new (for security issues)
-
----
-
-*Una versión en español de esta política está disponible bajo petición. Envíe un correo a aegislink.report@gmail.com con el asunto "Privacy Policy — Español".*

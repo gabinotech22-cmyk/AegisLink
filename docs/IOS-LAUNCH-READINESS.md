@@ -114,7 +114,7 @@ una App Store Connect API Key a expo.dev — ver Fase 1). Sin Xcode, sin Keychai
   de Apple; declarar `false` sería inexacto (lo flagó CodeRabbit en PR #277). El interino `false`
   se puso solo para pasar la validación del **primer** upload a TestFlight interno; queda revertido.
 - **Clasificación (US EAR / control de exportación)**: AegisLink usa **algoritmos estándar
-  publicados** — TweetNaCl (Curve25519, XSalsa20, Poly1305) — sobre una implementación **open
+  publicados** — libsodium (Curve25519, XSalsa20, Poly1305) — sobre una implementación **open
   source**. Esto suele calificar para la **auto-clasificación simplificada** (License Exception ENC
   §740.17(b), con **annual self-report a BIS**) en lugar de un **CCATS** completo. **Confirmar con
   la guía de BIS / un abogado antes del lanzamiento público** — es una declaración legal del dueño,

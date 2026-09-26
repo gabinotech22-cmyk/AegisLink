@@ -266,7 +266,7 @@ defensive commitment to keep the project free of patent threats.
 - **Matrix**: [#aegislink:matrix.org](https://matrix.to/#/#aegislink:matrix.org)
 - **Discord**: [discord.gg/qNEfz86yDJ](https://discord.gg/qNEfz86yDJ) — questions, bug reports, crypto review
 - **Protocol & threat model**: [docs/PROTOCOL.md](docs/PROTOCOL.md)
-- **Contact**: gabinotech22@gmail.com
+- **Contact**: aegislink.report@gmail.com
 
 ## Security
 

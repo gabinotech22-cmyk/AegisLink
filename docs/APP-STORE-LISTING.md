@@ -401,7 +401,7 @@ de dato:
 ## Export compliance (cripto)
 `ITSAppUsesNonExemptEncryption: true` ya está en `mobile/app.json`. Cada build
 de TestFlight/producción pregunta por compliance: AegisLink usa cifrado
-estándar (TweetNaCl/NaCl secretbox, Double Ratchet/X3DH) para confidencialidad
+estándar (libsodium: NaCl secretbox/box, Double Ratchet/X3DH) para confidencialidad
 de comunicaciones de usuario final — normalmente califica para la **exención
 de excepción de uso masivo de mercado** (ver `docs/IOS-LAUNCH-READINESS.md`
 Fase 2, "Export compliance"). Decidir y documentar la clasificación exacta
