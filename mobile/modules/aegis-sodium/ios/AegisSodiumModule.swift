@@ -75,6 +75,72 @@ public class AegisSodiumModule: Module {
     Function("mlkem768Dec") { (ss: Uint8Array, ct: Uint8Array, sk: Uint8Array) -> Int in
       Int(aegis_mlkem768_dec(mp(ss), n(ss), p(ct), n(ct), p(sk), n(sk)))
     }
+    // ── Key vault (F-1b) ─────────────────────────────────────────────────
+    // Unlock: the KEK goes from the Keychain straight into the C vault; JS
+    // only learns that the profile is usable.
+    AsyncFunction("vaultUnlock") { (slot: String) throws in
+      var slotBytes = try VaultKek.checkSlot(slot)
+      var kek = try VaultKek.kek(slot: slot)
+      defer { kek.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) } }
+      let slotLen = slotBytes.count
+      let kekLen = kek.count
+      let rc = aegis_vault_unlock(&slotBytes, slotLen, &kek, kekLen)
+      guard rc == 0 else {
+        throw Exception(name: "ERR_AEGIS_VAULT", description: "aegis_vault_unlock failed: \(rc)")
+      }
+    }
+    // Panic / profile wipe: destroy the profile's keys and forget its KEK.
+    AsyncFunction("vaultDestroyProfile") { (slot: String) throws in
+      var slotBytes = try VaultKek.checkSlot(slot)
+      let slotLen = slotBytes.count
+      _ = aegis_vault_lock(&slotBytes, slotLen)
+      try VaultKek.destroy(slot: slot)
+    }
+    Function("vaultLock") { (slot: String) throws -> Int in
+      var slotBytes = try VaultKek.checkSlot(slot)
+      let slotLen = slotBytes.count
+      return Int(aegis_vault_lock(&slotBytes, slotLen))
+    }
+    Function("vaultLockAll") { () -> Int in Int(aegis_vault_lock_all()) }
+    Function("vaultGenerate") { (handle: Uint8Array, blob: Uint8Array, pub: Uint8Array, slot: Uint8Array, type: Int) -> Int in
+      Int(aegis_vault_generate(h(handle), mp(blob), n(blob), mp(pub), n(pub), p(slot), n(slot), Int32(type)))
+    }
+    Function("vaultImport") { (handle: Uint8Array, blob: Uint8Array, pub: Uint8Array, slot: Uint8Array, type: Int, raw: Uint8Array) -> Int in
+      Int(aegis_vault_import(h(handle), mp(blob), n(blob), mp(pub), n(pub), p(slot), n(slot), Int32(type), p(raw), n(raw)))
+    }
+    Function("vaultLoad") { (handle: Uint8Array, type: Uint8Array, pub: Uint8Array, slot: Uint8Array, blob: Uint8Array) -> Int in
+      let typeOut = type.byteLength == 4 ? type.rawPointer.assumingMemoryBound(to: Int32.self) : nil
+      return Int(aegis_vault_load(h(handle), typeOut, mp(pub), n(pub), p(slot), n(slot), p(blob), n(blob)))
+    }
+    Function("vaultDeriveEd25519") { (handle: Uint8Array, blob: Uint8Array, pub: Uint8Array, xhandle: Uint8Array) -> Int in
+      guard let x = hIn(xhandle) else { return -1 }
+      return Int(aegis_vault_derive_ed25519(h(handle), mp(blob), n(blob), mp(pub), n(pub), x))
+    }
+    Function("vaultRelease") { (handle: Uint8Array) -> Int in
+      guard let k = hIn(handle) else { return -1 }
+      return Int(aegis_vault_release(k))
+    }
+    Function("vaultSign") { (handle: Uint8Array, sig: Uint8Array, m: Uint8Array) -> Int in
+      guard let k = hIn(handle) else { return -1 }
+      return Int(aegis_vault_sign(k, mp(sig), n(sig), p(m), n(m)))
+    }
+    Function("vaultScalarmult") { (handle: Uint8Array, q: Uint8Array, pt: Uint8Array) -> Int in
+      guard let k = hIn(handle) else { return -1 }
+      return Int(aegis_vault_scalarmult(k, mp(q), n(q), p(pt), n(pt)))
+    }
+    Function("vaultBox") { (handle: Uint8Array, c: Uint8Array, m: Uint8Array, nonce: Uint8Array, pk: Uint8Array) -> Int in
+      guard let k = hIn(handle) else { return -1 }
+      return Int(aegis_vault_box(k, mp(c), n(c), p(m), n(m), p(nonce), n(nonce), p(pk), n(pk)))
+    }
+    Function("vaultBoxOpen") { (handle: Uint8Array, m: Uint8Array, c: Uint8Array, nonce: Uint8Array, pk: Uint8Array) -> Int in
+      guard let k = hIn(handle) else { return -1 }
+      return Int(aegis_vault_box_open(k, mp(m), n(m), p(c), n(c), p(nonce), n(nonce), p(pk), n(pk)))
+    }
+    Function("vaultMlkem768Dec") { (handle: Uint8Array, ss: Uint8Array, ct: Uint8Array) -> Int in
+      guard let k = hIn(handle) else { return -1 }
+      return Int(aegis_vault_mlkem768_dec(k, mp(ss), n(ss), p(ct), n(ct)))
+    }
+    Function("vaultLiveKeys") { () -> Int in Int(aegis_vault_live_keys()) }
     // Hundreds of milliseconds of work: async (off the JS thread), so it cannot
     // touch JS memory. Expo copies the password and salt into `Data` on the JS
     // thread; the key comes back as an int array. Copies made here are zeroed.
@@ -167,4 +233,14 @@ private func wipe(_ data: Data) {
       _ = memset_s(UnsafeMutableRawPointer(mutating: base), buf.count, 0, buf.count)
     }
   }
+}
+
+/// A handle output: the 4-byte array's memory as a uint32 slot (iOS is little-endian).
+private func h(_ a: Uint8Array) -> UnsafeMutablePointer<UInt32>? {
+  a.byteLength == 4 ? a.rawPointer.assumingMemoryBound(to: UInt32.self) : nil
+}
+
+/// A handle input (4 bytes, little-endian); nil if malformed.
+private func hIn(_ a: Uint8Array) -> UInt32? {
+  a.byteLength == 4 ? a.rawPointer.loadUnaligned(as: UInt32.self) : nil
 }

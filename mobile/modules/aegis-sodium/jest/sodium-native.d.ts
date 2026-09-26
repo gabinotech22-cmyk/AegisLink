@@ -13,6 +13,11 @@ declare module 'sodium-native' {
     randombytes_buf(buf: Bytes): void;
     sodium_memcmp(a: Bytes, b: Bytes): boolean;
     sodium_memzero(buf: Bytes): void;
+    /** Secure memory (guard pages, mlock) for the desktop key vault (F-1b). */
+    sodium_malloc(size: number): Buffer;
+    sodium_mprotect_noaccess(buf: Buffer): void;
+    sodium_mprotect_readonly(buf: Buffer): void;
+    sodium_mprotect_readwrite(buf: Buffer): void;
 
     crypto_box_keypair(pk: Bytes, sk: Bytes): void;
     crypto_box_easy(c: Bytes, m: Bytes, n: Bytes, pk: Bytes, sk: Bytes): void;

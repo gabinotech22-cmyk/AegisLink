@@ -24,12 +24,14 @@ import { argon2id } from '@noble/hashes/argon2.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import sodium from 'sodium-native';
 import type { AegisSodiumNative } from '../index';
+import { makeNodeVault, type VaultMethods } from './nodeVault';
 
 const OK = 0;
 const EVERIFY = 1;
 const EBADLEN = -1;
 const EFAIL = -2;
 export { OK as AEGIS_OK, EVERIFY as AEGIS_EVERIFY, EBADLEN as AEGIS_EBADLEN, EFAIL as AEGIS_EFAIL };
+export const AEGIS_ENOKEY = -3;
 
 const MAC = 16;
 const NONCE = 24;
@@ -78,7 +80,7 @@ function hsalsa20Zero(key: Uint8Array): Uint8Array {
   return out;
 }
 
-const nodeBackend: AegisSodiumNative = {
+const base: Omit<AegisSodiumNative, keyof VaultMethods> = {
   init: () => OK,
   randombytes: (buf) => {
     if (!isBytes(buf)) return EBADLEN;
@@ -260,5 +262,7 @@ function leadingZeroBits(d: Uint8Array, bits: number): boolean {
   for (let i = 0; i < full; i++) if (d[i] !== 0) return false;
   return bits % 8 === 0 || (d[full] & (0xff << (8 - (bits % 8)))) === 0;
 }
+
+const nodeBackend: AegisSodiumNative = { ...base, ...makeNodeVault(base) };
 
 export default nodeBackend;

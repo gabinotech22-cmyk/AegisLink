@@ -178,11 +178,20 @@ y separable (NO enredado con los canales públicos sellados, que son normales y 
         `f1-golden.test.ts` y toda la suite de Jest sobre libsodium real (`jest/nodeBackend.ts`,
         sodium-native). `tweetnacl` pasa a devDependency (oráculo de tests). Pendiente de verificar
         en dispositivo con el primer build EAS (Android e iOS).
-- [ ] **F-1b — claves en memoria nativa (handles opacos)**: tras F-1, las claves privadas viven solo
-      en memoria nativa (módulo en mobile, proceso main en desktop) y JS recibe un handle, como
-      libsignal. Un XSS en el renderer ya no podría leer claves. F-1 cierra el timing del JIT pero no
-      saca las claves del heap de JS.
-      Incluye ML-KEM-768 nativo en desktop (ver abajo).
+- [ ] **F-1b — claves en memoria nativa (handles opacos)** 🟡: tras F-1, las claves privadas viven
+      solo en memoria nativa (módulo en mobile, proceso main en desktop) y JS recibe un handle, como
+      libsignal. Un XSS en el renderer ya no podría leer claves. Alcance aprobado (2026-09-25): fases 1
+      (identidad), 2 (prekeys + ML-KEM desktop) y 3 (ratchet). Diseño:
+      [`F1B-KEY-VAULT-DESIGN.md`](./F1B-KEY-VAULT-DESIGN.md).
+      - [x] **1a — bóveda** ✅: C core `cpp/aegis_vault.c` (memoria guarded, handles, blobs
+        envueltos con la KEK del perfil, slot autenticado) con la KEK en Keystore/Keychain
+        (`VaultKek.kt`, `VaultKek.swift`); desktop en el proceso main (`main/crypto/vault/`, KEK en
+        `safeStorage`, canal `vault:call`). Fachadas `crypto/sodium/vault.ts` en las dos plataformas.
+        Pruebas: `differential.mjs` (bóveda C vs TweetNaCl/@noble, aislamiento, manipulación,
+        liberación, bloqueo), `vault.test.ts` gemelos, `main/crypto/vault/__tests__/ops.test.ts`.
+      - [ ] 1b — claves de identidad a la bóveda (migración + todos los usos).
+      - [ ] 2 — prekeys (SPK/OPK/PQSPK) y ML-KEM desktop en main.
+      - [ ] 3 — estado del Double Ratchet (C en mobile, main en desktop), sellado.
 - [x] **Argon2id nativo en mobile** ✅ (#549; efectivo desde el primer build nativo que lo incluya):
       PIN y backup v3 corren en libsodium nativo, fuera del hilo de JS. **Sin formato de backup
       nuevo**: el núcleo C llama a `argon2id_hash_raw` (acepta salts de 8–64 B), así que los backups

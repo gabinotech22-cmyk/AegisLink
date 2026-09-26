@@ -18,9 +18,21 @@ export interface SodiumBridge {
   callAsync(op: string, args: unknown[]): Promise<unknown>;
 }
 
+/** Envelope returned by the main process for every `vault:call` (see main/crypto/vault/ops.ts). */
+export type VaultResult =
+  | { ok: true; value: unknown }
+  | { ok: false; code: 'NOKEY' | 'REJECTED' | 'BAD_ARG' | 'FAIL'; message: string };
+
+export interface VaultBridge {
+  /** Synchronous (ipcRenderer.sendSync), like `sodium.call`. */
+  call(op: string, args: unknown[]): unknown;
+}
+
 export interface AegisIPC {
   /** F-1: native libsodium running in the main process. */
   sodium: SodiumBridge;
+  /** F-1b: key vault in the main process; private keys never come back. */
+  vault: VaultBridge;
   secureStorage: {
     set(key: string, value: string): Promise<void>;
     get(key: string): Promise<string | null>;

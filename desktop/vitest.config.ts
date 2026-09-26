@@ -15,6 +15,10 @@ export default defineConfig({
     // SAME main-process operation table (real sodium-native, IPC-style cloning).
     alias: [
       {
+        find: /^\.\/vaultIpcBridge$/,
+        replacement: path.resolve(__dirname, 'src/main/crypto/vault/__tests__/directBridge.ts'),
+      },
+      {
         find: /^\.\/sodiumIpcBridge$/,
         replacement: path.resolve(__dirname, 'src/main/crypto/sodium/__tests__/directBridge.ts'),
       },
