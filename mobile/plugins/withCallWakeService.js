@@ -15,12 +15,18 @@
  * sealed-sender crypto stays in the audited JS layer (native never sees keys).
  *
  * Pieces:
- *   1. <service AegisWakeService type=dataSync> + <receiver AegisWakeBootReceiver>
- *      (BOOT_COMPLETED) in AndroidManifest.
+ *   1. <service AegisWakeService type=remoteMessaging> + <receiver
+ *      AegisWakeBootReceiver> (BOOT_COMPLETED) in AndroidManifest.
+ *
+ * Why remoteMessaging and not dataSync: with targetSdk 35, Android 15 forbids a
+ * dataSync FGS from starting on BOOT_COMPLETED (ForegroundServiceStartNotAllowed
+ * crashed the process on every reboot) and caps dataSync at 6 h per 24 h, which
+ * a 24/7 wake socket can never honour. remoteMessaging has neither limit and is
+ * what SimpleX Chat declares for the same always-on messaging service.
  *   2. AegisWakeService/Module/BootReceiver/Package .kt into the app package dir.
  *   3. Register AegisWakePackage() in MainApplication.kt.
  *
- * Permissions (FOREGROUND_SERVICE, FOREGROUND_SERVICE_DATA_SYNC,
+ * Permissions (FOREGROUND_SERVICE, FOREGROUND_SERVICE_REMOTE_MESSAGING,
  * RECEIVE_BOOT_COMPLETED, POST_NOTIFICATIONS) are declared in app.json.
  */
 const {
@@ -41,15 +47,15 @@ function withServiceManifest(config) {
     if (!app) return config;
 
     app.service = app.service || [];
-    if (!app.service.some((s) => s.$?.['android:name'] === SERVICE_NAME)) {
-      app.service.push({
-        $: {
-          'android:name': SERVICE_NAME,
-          'android:exported': 'false',
-          'android:foregroundServiceType': 'dataSync',
-        },
-      });
-    }
+    // Upsert: a manifest prebuilt before 1.0.7 still says dataSync.
+    const service = app.service.find((s) => s.$?.['android:name'] === SERVICE_NAME);
+    const attrs = {
+      'android:name': SERVICE_NAME,
+      'android:exported': 'false',
+      'android:foregroundServiceType': 'remoteMessaging',
+    };
+    if (service) service.$ = { ...service.$, ...attrs };
+    else app.service.push({ $: attrs });
 
     app.receiver = app.receiver || [];
     if (!app.receiver.some((r) => r.$?.['android:name'] === RECEIVER_NAME)) {
@@ -109,7 +115,12 @@ class AegisWakeService : HeadlessJsTaskService() {
       stopSelf()
       return START_NOT_STICKY
     }
-    startForegroundInternal()
+    // If Android refuses the foreground start (background-start restrictions),
+    // stop quietly instead of crashing the whole app process.
+    if (!startForegroundInternal()) {
+      stopSelf()
+      return START_NOT_STICKY
+    }
     // Launch the JS task (HeadlessJsTaskService reads getTaskConfig below).
     super.onStartCommand(intent, flags, startId)
     // STICKY: if Android reclaims us, restart to re-establish the wake socket.
@@ -125,7 +136,7 @@ class AegisWakeService : HeadlessJsTaskService() {
   // process resident so the socket survives. The default impl would stopSelf().
   override fun onHeadlessJsTaskFinish(taskId: Int) { /* keep the service alive */ }
 
-  private fun startForegroundInternal() {
+  private fun startForegroundInternal(): Boolean {
     createChannel()
     val launch = packageManager.getLaunchIntentForPackage(packageName)?.apply {
       flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -142,10 +153,16 @@ class AegisWakeService : HeadlessJsTaskService() {
       .setPriority(NotificationCompat.PRIORITY_MIN)
       .setContentIntent(pi)
       .build()
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-    } else {
-      startForeground(NOTIF_ID, notif)
+    return try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+      } else {
+        // Before Android 14 the type comes from the manifest.
+        startForeground(NOTIF_ID, notif)
+      }
+      true
+    } catch (e: RuntimeException) {
+      false
     }
   }
 
@@ -255,10 +272,15 @@ class AegisWakeBootReceiver : BroadcastReceiver() {
     val svc = Intent(ctx, AegisWakeService::class.java).apply {
       action = AegisWakeService.ACTION_START
     }
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-      ctx.startForegroundService(svc)
-    } else {
-      ctx.startService(svc)
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        ctx.startForegroundService(svc)
+      } else {
+        ctx.startService(svc)
+      }
+    } catch (e: RuntimeException) {
+      // The OS refused the start; the service comes back the next time the app
+      // is opened. Never crash the boot broadcast.
     }
   }
 }
@@ -318,3 +340,4 @@ module.exports = (config) => {
   config = withPackageRegistration(config);
   return config;
 };
+module.exports.KT = KT;
