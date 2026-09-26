@@ -4922,6 +4922,9 @@ export async function sendMessage(opts: {
       const tokenless = !('deliveryToken' in emitWire);
       if (mailboxAckConfirmsDelivery(ack) || (tokenless && !!ack && ack.ok === true)) {
         try { await deleteOutboxJob(jobId); } catch { /* non-fatal */ }
+        // Settle the bubble like the other two transports do; skipping this left
+        // every mailbox-delivered message on "SENDING…" forever.
+        try { await useMessages.getState().updateDelivery(opts.recipientAegisId, id, 'sent'); } catch { /* non-fatal */ }
         // Multi-device self-copy stays on the aegisId control socket (it is
         // identity-scoped sync, not a recipient-graph leak). Same as below.
         // Control messages (typing/read-receipt/delete) are NEVER self-copied —

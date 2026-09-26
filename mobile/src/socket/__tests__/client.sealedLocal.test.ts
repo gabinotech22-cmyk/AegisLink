@@ -316,6 +316,7 @@ describe('sealed transport to contacts on our relay (caps-gated)', () => {
     mockSaveContact.mockClear();
     mockEnqueueOutboxJob.mockClear();
     mockSendViaMailbox.mockClear();
+    mockUpdateDelivery.mockClear();
     mockSendViaForeignRelay.mockClear();
     mockForeignRelayHttp.mockReset();
     client = require('../client') as typeof import('../client');
@@ -443,6 +444,9 @@ describe('sealed transport to contacts on our relay (caps-gated)', () => {
     // queued ack accepted as terminal: the job is gone, no fall-through emit.
     const { deleteOutboxJob } = require('../../db/local') as { deleteOutboxJob: jest.Mock };
     expect(deleteOutboxJob).toHaveBeenCalled();
+    // …and the bubble settles: without this it sat on "SENDING…" forever even
+    // though the recipient had the message (seen on the 1.0.7 emulators).
+    expect(mockUpdateDelivery).toHaveBeenCalledWith(peer.aegisId, env.id, 'sent');
   });
 
   it('messages: first contact to a local peer with a root → v2 with the fc bootstrap (never v1)', async () => {
