@@ -15,6 +15,34 @@ keeps no logs of who talks to whom.
 > review, issues and responsible disclosure are very welcome (see
 > [SECURITY.md](SECURITY.md)).
 
+## Why AegisLink
+
+Other messengers promise not to hand over your data. AegisLink is built so
+there is no data to hand over.
+
+Most encrypted messengers protect *what* you say, but not *who you are* or
+*who you talk to*. Your account is tied to a phone number, and in most
+countries that number is tied to your legal identity. The server sees your IP
+address. Many services also know your contacts and when and how often you talk
+to each of them. That metadata is what gets handed over when a government asks,
+and it is often enough to identify a journalist's source, a patient's doctor or
+a client's lawyer without reading a single message.
+
+When a messenger's privacy rests on its company's policy, you have to trust
+that company. AegisLink moves that protection into the design itself:
+
+- **No phone number, no email.** Your identity is a random Aegis ID created on
+  your device.
+- **Tor, always.** Every connection goes through Tor, so the relay never sees
+  your IP.
+- **No sender on the envelope.** Messages travel sealed, so the relay does not
+  know who wrote to whom.
+- **Nothing to subpoena.** A court order cannot compel records that were never
+  created (see [docs/LEGAL.md](docs/LEGAL.md)).
+
+This protection has limits, and we list them ourselves in
+[Known limitations](#known-limitations-read-this) below.
+
 ## Non-negotiable principles
 
 1. **Zero metadata** — no IP logs, no access timestamps, no message sizes, no
@@ -127,9 +155,6 @@ short version:
   but the TURN server does. It does not learn your Aegis ID: TURN credentials
   carry a random name, not your identity. The desktop client sends TURN over TCP
   through Tor.
-- **Expo's update server is contacted directly, outside Tor.** The app checks
-  `u.expo.dev` for over-the-air fixes on launch, so Expo sees your IP and that
-  the app is installed. The check carries no messages, contacts or Aegis ID.
 - **One maintainer, one official relay.** The project is maintained by a single
   developer, and the official relay runs in a single region, so expect occasional
   downtime. You can self-host a relay (`.onion`-only) and still talk to contacts
