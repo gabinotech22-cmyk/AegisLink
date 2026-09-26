@@ -1228,7 +1228,7 @@ async function getOrCreateSessionLocked(
 ): Promise<RatchetState> {
   const existingJson = await loadRatchetSession(contactAegisId);
   if (existingJson) {
-    const s = reviveRatchetState(existingJson);
+    const s = reviveRatchetState(existingJson, identity.secretKey.slot);
     return s as RatchetState;
   }
 
@@ -1302,6 +1302,7 @@ async function getOrCreateSessionLocked(
     ? decodeBase64(bundle.pqSignedPreKey.publicKeyB64)
     : null;
   const ratchetState = initRatchet(
+    identity.secretKey.slot,
     x3dh.rootKey,
     decodeBase64(bundle.signedPreKey.publicKeyB64),
     true,
@@ -1309,6 +1310,7 @@ async function getOrCreateSessionLocked(
     undefined,
     initialPQr,
   );
+  x3dh.rootKey.fill(0); // the vault holds its own copy now
 
   ratchetState.x3dhInit = {
     aliceEKB64: x3dh.myEphemeralPublicKeyB64,
@@ -1391,7 +1393,7 @@ async function sendNudgeOverExistingSession(
   if (!existingJson) return false;
   let session: RatchetState;
   try {
-    const s = reviveRatchetState(existingJson);
+    const s = reviveRatchetState(existingJson, identity.secretKey.slot);
     session = s as RatchetState;
   } catch {
     return false;
@@ -1573,7 +1575,7 @@ async function decryptAndAppendLocked(
   }
 
   if (existingJson && !parsed.x3dh) {
-    const s = reviveRatchetState(existingJson);
+    const s = reviveRatchetState(existingJson, identity.secretKey.slot);
     ratchetState = s;
   } else {
     if (!parsed.x3dh) {
@@ -1659,10 +1661,11 @@ async function decryptAndAppendLocked(
     const initialPQs = pqInputs
       ? { publicKey: pqInputs.pqSpkSecret.publicKey, secretKey: pqInputs.pqSpkSecret }
       : null;
-    ratchetState = initRatchet(rootKey, decodeBase64(parsed.ratchet.ratchetKeyB64), false, {
+    ratchetState = initRatchet(identity.secretKey.slot, rootKey, decodeBase64(parsed.ratchet.ratchetKeyB64), false, {
       publicKey: spkPublicKey,
       secretKey: mySpkSecret,
     }, initialPQs);
+    rootKey.fill(0); // the vault holds its own copy now
 
     // Adopting an inbound init — converged. Clear the recovery marker so stale
     // in-flight messages on the old session don't re-trigger recovery, and
@@ -1708,9 +1711,9 @@ async function decryptAndAppendLocked(
         '[socket] Double Ratchet decryption failed',
         `peer=${contact.aegisId} hadSession=${Boolean(existingJson)} hadX3dh=${Boolean(parsed.x3dh)}`,
         `hdr(n=${rHeader.n} pn=${rHeader.pn} rk=${ratchetFp(rHeader.ratchetKey)})`,
-        `state(Ns=${ratchetState.Ns} Nr=${ratchetState.Nr} PN=${ratchetState.PN}`,
-        `DHr=${ratchetFp(ratchetState.DHr)} DHsPub=${ratchetFp(ratchetState.DHs.publicKey)}`,
-        `CKr=${ratchetState.CKr ? 'set' : 'null'} CKs=${ratchetState.CKs ? 'set' : 'null'})`,
+        `state(Ns=${ratchetState.info.Ns} Nr=${ratchetState.info.Nr} PN=${ratchetState.info.PN}`,
+        `DHr=${ratchetFp(ratchetState.info.dhr)} DHsPub=${ratchetFp(ratchetState.info.dhsPublicKey)}`,
+        `CKr=${ratchetState.info.hasCKr ? 'set' : 'null'} CKs=${ratchetState.info.hasCKs ? 'set' : 'null'})`,
       );
     }
     if (existingJson && !parsed.x3dh) {
@@ -2249,11 +2252,11 @@ async function handleIncoming(env: WireSealedEnvelope, identity: Identity) {
 // ─── Self-encrypted copy (multi-device sync) ─────────────────────────────────
 // Ported from mobile/src/socket/client.ts — see that file for full rationale.
 
-async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
+async function getSelfRatchet(identity: Identity): Promise<RatchetState | null> {
   try {
-    const raw = await SecureStore.getItemAsync(SECURE_SELF_RATCHET_KEY(myAegisId));
+    const raw = await SecureStore.getItemAsync(SECURE_SELF_RATCHET_KEY(identity.aegisId));
     if (!raw) return null;
-    const s = reviveRatchetState(raw);
+    const s = reviveRatchetState(raw, identity.secretKey.slot);
     return s as RatchetState;
   } catch (e) {
     if (DEV) logger.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
@@ -2263,22 +2266,8 @@ async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
 
 async function saveSelfRatchet(myAegisId: string, state: RatchetState): Promise<void> {
   trimOldSkippedKeys(state, MAX_SKIPPED_KEYS);
-  const serialized = {
-    RK: state.RK,
-    DHs: state.DHs,
-    DHr: state.DHr,
-    CKs: state.CKs,
-    CKr: state.CKr,
-    Ns: state.Ns,
-    Nr: state.Nr,
-    PN: state.PN,
-    MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
-    x3dhInit: state.x3dhInit,
-  };
-  await SecureStore.setItemAsync(
-    SECURE_SELF_RATCHET_KEY(myAegisId),
-    JSON.stringify(serialized),
-  );
+  // The one serializer (ratchetSerde): the vault-sealed state, never raw keys.
+  await SecureStore.setItemAsync(SECURE_SELF_RATCHET_KEY(myAegisId), serializeRatchetState(state));
 }
 
 async function initSelfSession(identity: Identity, sock: Socket): Promise<RatchetState> {
@@ -2301,10 +2290,12 @@ async function initSelfSession(identity: Identity, sock: Socket): Promise<Ratche
 
   const x3dh = performX3DH(identity, bundle);
   const ratchetState = initRatchet(
+    identity.secretKey.slot,
     x3dh.rootKey,
     decodeBase64(bundle.signedPreKey.publicKeyB64),
     true,
   );
+  x3dh.rootKey.fill(0); // the vault holds its own copy now
   ratchetState.x3dhInit = {
     aliceEKB64: x3dh.myEphemeralPublicKeyB64,
     spkId: bundle.signedPreKey.keyId,
@@ -2330,7 +2321,7 @@ async function sendSelfCopy(
   if (meta.ephemeralSeconds !== undefined && meta.ephemeralSeconds > 0 && meta.ephemeralSeconds < 5) return;
 
   try {
-    let ratchet = await getSelfRatchet(identity.aegisId);
+    let ratchet = await getSelfRatchet(identity);
     if (!ratchet) {
       ratchet = await initSelfSession(identity, sock);
     }
@@ -2426,7 +2417,7 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     return;
   }
 
-  let ratchet = await getSelfRatchet(identity.aegisId);
+  let ratchet = await getSelfRatchet(identity);
   if (!ratchet) {
     if (!parsed.x3dh) {
       if (DEV) logger.warn('[socket] self-copy: no session and no X3DH headers — dropping');
@@ -2462,10 +2453,11 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     }
     const spkPub = mySpkSecret.publicKey;
     const rHeader = parsed.ratchet as { ratchetKeyB64: string };
-    ratchet = initRatchet(rootKey, decodeBase64(rHeader.ratchetKeyB64), false, {
+    ratchet = initRatchet(identity.secretKey.slot, rootKey, decodeBase64(rHeader.ratchetKeyB64), false, {
       publicKey: spkPub,
       secretKey: mySpkSecret,
     });
+    rootKey.fill(0); // the vault holds its own copy now
   }
 
   const r = parsed.ratchet as { ratchetKeyB64: string; n: number; pn: number; ciphertextB64: string; nonceB64: string };

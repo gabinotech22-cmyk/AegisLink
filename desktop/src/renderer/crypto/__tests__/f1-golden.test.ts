@@ -128,13 +128,13 @@ describe('F-1 golden fixtures (pre-libsodium output must stay valid)', () => {
   for (const kind of ['classic', 'hybrid'] as const) {
     it(`a persisted ${kind} ratchet session keeps decrypting (incl. out-of-order)`, () => {
       const t = golden.ratchet[kind];
-      const bob = reviveRatchetState(t.bobState);
+      const bob = reviveRatchetState(t.bobState, 'self');
       const [m1, m2, m3] = t.aliceMsgs;
       expect(decryptWire(bob, m1)).toBe(m1.plaintext);
       expect(decryptWire(bob, m3)).toBe(m3.plaintext);
       expect(decryptWire(bob, m2)).toBe(m2.plaintext); // from MKSKIPPED
 
-      const alice = reviveRatchetState(t.aliceStateAfterSend);
+      const alice = reviveRatchetState(t.aliceStateAfterSend, 'self');
       expect(decryptWire(alice, t.bobReply)).toBe(t.bobReply.plaintext); // DH ratchet step
     });
   }

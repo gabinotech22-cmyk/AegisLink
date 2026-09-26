@@ -22,6 +22,8 @@ Pod::Spec.new do |s|
     'ios/**/*.swift',
     'cpp/aegis_sodium.{h,c}',
     'cpp/aegis_vault.{h,c}',
+    'cpp/aegis_vault_internal.h',
+    'cpp/aegis_ratchet.c',
     "#{sodium}/**/*.{c,h}",
   ]
   # No public headers: Swift reaches the C core only through cpp/module.modulemap

@@ -159,6 +159,7 @@ jest.mock('socket.io-client', () => ({
 import type { Identity } from '../../crypto/identity';
 import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
 import { vault } from '../../crypto/sodium/vault';
+import { serializeRatchetState } from '../ratchetSerde';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
@@ -168,17 +169,7 @@ function buildIdentity(): Identity {
 
 /** Serialize a ratchet state into the persisted-session JSON shape. */
 function persistSession(aegisId: string, state: RatchetState): void {
-  const serial = {
-    RK: Array.from(state.RK),
-    DHs: { publicKey: Array.from(state.DHs.publicKey), secretKey: Array.from(state.DHs.secretKey as Uint8Array) },
-    DHr: state.DHr ? Array.from(state.DHr) : null,
-    CKs: state.CKs ? Array.from(state.CKs) : null,
-    CKr: state.CKr ? Array.from(state.CKr) : null,
-    Ns: state.Ns, Nr: state.Nr, PN: state.PN,
-    MKSKIPPED: [],
-    createdAtMs: state.createdAtMs,
-  };
-  mockRatchetSessions.set(aegisId, JSON.stringify(serial));
+  mockRatchetSessions.set(aegisId, serializeRatchetState(state));
 }
 
 /**
@@ -189,9 +180,9 @@ function persistSession(aegisId: string, state: RatchetState): void {
 function establishSyncedSession(me: Identity, peer: Identity): RatchetState {
   const spk = nacl.box.keyPair();
   const root = nacl.randomBytes(32);
-  const sender = initRatchet(root, spk.publicKey, true);
+  const sender = initRatchet('self', root, spk.publicKey, true);
   delete sender.x3dhInit;
-  const receiver = initRatchet(root, sender.DHs.publicKey, false, spk);
+  const receiver = initRatchet('self', root, sender.info.dhsPublicKey, false, spk);
   delete receiver.x3dhInit;
   receiver.createdAtMs = Date.now() - 120_000;
   persistSession(peer.aegisId, receiver);

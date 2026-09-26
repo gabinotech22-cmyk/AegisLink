@@ -22,6 +22,7 @@ import {
   type RatchetState,
 } from '../ratchet';
 import { pk, pkOrNull } from '../../__tests__/helpers/rawIdentity';
+import { peek } from '../../__tests__/helpers/ratchetPeek';
 
 interface Session {
   aliceState: RatchetState;
@@ -44,8 +45,8 @@ function newSession(): Session {
   );
 
   const bobSpkPub = decodeBase64(bob.bundle.signedPreKey.publicKeyB64);
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true);
-  const bobState = initRatchet(bobRoot, new Uint8Array(), false, {
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true);
+  const bobState = initRatchet('self', bobRoot, new Uint8Array(), false, {
     publicKey: bobSpkPub,
     secretKey: pk(bob.secrets.signedPreKey.secretStored),
   });
@@ -217,8 +218,9 @@ function newHybridSession(): Session {
   const bobSpkPub = decodeBase64(bobPreKeys.signedPreKey.publicKeyB64);
   const bobPqPub = decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64);
 
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true, undefined, null, bobPqPub);
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true, undefined, null, bobPqPub);
   const bobState = initRatchet(
+    'self',
     bobRoot,
     new Uint8Array(),
     false,
@@ -355,6 +357,6 @@ describe('Double Ratchet — MAX_SKIPPED_KEYS bound', () => {
     const tail = msgs[MAX_SKIPPED_KEYS];
     expect(dec(bobState, tail)).toBe('m' + MAX_SKIPPED_KEYS);
     // And the cap on the skipped-keys map is enforced.
-    expect(bobState.MKSKIPPED.size).toBeLessThanOrEqual(MAX_SKIPPED_KEYS);
+    expect(peek(bobState).skipped.length).toBeLessThanOrEqual(MAX_SKIPPED_KEYS);
   });
 });

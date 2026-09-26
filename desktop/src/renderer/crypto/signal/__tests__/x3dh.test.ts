@@ -9,7 +9,7 @@ import {
   generatePreKeys,
   type PreKeyBundle,
 } from '../x3dh';
-import { initRatchet, ratchetEncrypt, ratchetDecrypt } from '../ratchet';
+import { cloneState, initRatchet, ratchetEncrypt, ratchetDecrypt } from '../ratchet';
 import { type Identity } from '../../identity';
 import { hkdfSHA256 } from '../kdf';
 import { identityFromRaw } from '../../__tests__/helpers/rawIdentity';
@@ -224,7 +224,7 @@ describe('X3DH + Double Ratchet fresh-session first-message roundtrip', () => {
     // Alice
     const aliceX3DH = performX3DH(alice, bundle);
     const aliceState = initRatchet(
-      aliceX3DH.rootKey,
+      'self', aliceX3DH.rootKey,
       decodeBase64(bundle.signedPreKey.publicKeyB64),
       true,
     );
@@ -242,7 +242,7 @@ describe('X3DH + Double Ratchet fresh-session first-message roundtrip', () => {
       decodeBase64(aliceX3DH.myEphemeralPublicKeyB64),
     );
     const spkPub = mySpkSecret.publicKey;
-    const bobState = initRatchet(bobRoot, header.ratchetKey, false, {
+    const bobState = initRatchet('self', bobRoot, header.ratchetKey, false, {
       publicKey: spkPub,
       secretKey: mySpkSecret,
     });
@@ -478,7 +478,7 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
     const aliceX3DH = performX3DH(alice, bundle);
     expect(aliceX3DH.version).toBe(2);
     const aliceState = initRatchet(
-      aliceX3DH.rootKey,
+      'self', aliceX3DH.rootKey,
       decodeBase64(bundle.signedPreKey.publicKeyB64),
       true,
     );
@@ -498,7 +498,7 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
       },
     );
     const spkPub = pk(bobPreKeys.signedPreKey.secretStored).publicKey;
-    const bobState = initRatchet(bobRoot, header.ratchetKey, false, {
+    const bobState = initRatchet('self', bobRoot, header.ratchetKey, false, {
       publicKey: spkPub,
       secretKey: pk(bobPreKeys.signedPreKey.secretStored),
     });
@@ -544,7 +544,7 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     // Alice seeds Bob's PQSPK public key as her initial PQr (mirrors
     // socket/client.ts's getOrCreateSessionLocked).
     const aliceState = initRatchet(
-      aliceX3DH.rootKey,
+      'self', aliceX3DH.rootKey,
       decodeBase64(bundle.signedPreKey.publicKeyB64),
       true,
       undefined,
@@ -576,7 +576,7 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     // socket/client.ts's decryptAndAppendLocked).
     const spkPub = pk(bobPreKeys.signedPreKey.secretStored).publicKey;
     const bobState = initRatchet(
-      bobRoot,
+      'self', bobRoot,
       first.header.ratchetKey,
       false,
       { publicKey: spkPub, secretKey: pk(bobPreKeys.signedPreKey.secretStored) },
@@ -595,14 +595,14 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
 
   it('Bob decrypts the first message of a hybrid session (PQ mixed from message 1)', () => {
     const { aliceState, bobState } = establishHybridSession();
-    expect(aliceState.PQs).toBeTruthy();
-    expect(bobState.PQs).toBeTruthy();
+    expect(aliceState.info.hybrid).toBe(true);
+    expect(bobState.info.hybrid).toBe(true);
   });
 
   it('survives multiple round-trip chain turns, each rotating PQ material', () => {
     const { aliceState, bobState } = establishHybridSession();
 
-    const alicePqPubRound1 = encodeBase64(aliceState.PQs!.publicKey);
+    const alicePqPubRound1 = encodeBase64(ratchetEncrypt(cloneState(aliceState), new Uint8Array([0])).header.pqPub!);
 
     const reply1Plaintext = new TextEncoder().encode('hybrid message 2 (bob -> alice)');
     const reply1 = ratchetEncrypt(bobState, reply1Plaintext);
@@ -613,7 +613,7 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     expect(aliceOut1).not.toBeNull();
     expect(encodeBase64(aliceOut1!)).toBe(encodeBase64(reply1Plaintext));
 
-    const alicePqPubRound2 = encodeBase64(aliceState.PQs!.publicKey);
+    const alicePqPubRound2 = encodeBase64(ratchetEncrypt(cloneState(aliceState), new Uint8Array([0])).header.pqPub!);
     expect(alicePqPubRound2).not.toBe(alicePqPubRound1);
 
     const msg2Plaintext = new TextEncoder().encode('hybrid message 3 (alice -> bob)');

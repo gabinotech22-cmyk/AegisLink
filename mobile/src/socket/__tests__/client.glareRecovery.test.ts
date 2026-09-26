@@ -64,7 +64,7 @@ function aliceInit(alice: Peer, bob: Peer) {
     identityFromRaw(alice.box, alice.sign, alice.aegisId),
     bundleFor(bob),
   );
-  const senderState = initRatchet(x3dh.rootKey, bob.spk.publicKey, true);
+  const senderState = initRatchet('self', x3dh.rootKey, bob.spk.publicKey, true);
   return {
     rootKey: x3dh.rootKey,
     senderState,
@@ -85,7 +85,7 @@ function bobAdopt(bob: Peer, alice: Peer, init: ReturnType<typeof aliceInit>): {
     alice.box.publicKey,
     decodeBase64(init.x3dhInit.aliceEKB64),
   );
-  const state = initRatchet(rootKey, bob.spk.publicKey, false, {
+  const state = initRatchet('self', rootKey, bob.spk.publicKey, false, {
     publicKey: bob.spk.publicKey,
     secretKey: bob.spk.secretKey,
   });

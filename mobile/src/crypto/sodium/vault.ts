@@ -14,7 +14,33 @@
  * `VaultKeyUnavailableError` instead of operating.
  */
 import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
-import AegisSodium, { AEGIS_OK, AEGIS_EVERIFY, AEGIS_EFAIL, AEGIS_ENOKEY } from '../../../modules/aegis-sodium';
+import AegisSodium, {
+  AEGIS_OK,
+  AEGIS_EVERIFY,
+  AEGIS_EFAIL,
+  AEGIS_ENOKEY,
+  AEGIS_ERATCHET_STATE,
+  AEGIS_ERATCHET_NO_CHAIN,
+  AEGIS_ERATCHET_TOO_MANY_SKIPPED,
+  AEGIS_ERATCHET_LOW_ORDER,
+  AEGIS_ERATCHET_DOWNGRADE,
+  AEGIS_ERATCHET_PQ,
+} from '../../../modules/aegis-sodium';
+import {
+  RATCHET_STATE_LEN,
+  RATCHET_HEADER_LEN,
+  RATCHET_INFO_LEN,
+  decodeRatchetInfo,
+  packRatchetHeader,
+  unpackRatchetHeader,
+  type RatchetHeader,
+  type RatchetInfo,
+} from '../../../modules/aegis-sodium/ratchetState';
+
+// The ratchet's public types, and the state layout for the one-time import of
+// a pre-F-1b session (socket/ratchetSerde.ts), reach the app through here.
+export type { RatchetHeader, RatchetInfo, RawRatchetState, SkippedKey } from '../../../modules/aegis-sodium/ratchetState';
+export { encodeRatchetState } from '../../../modules/aegis-sodium/ratchetState';
 
 /**
  * 'x25519prekey' (SPK / OPK) does every X25519 operation, but is its own type
@@ -98,6 +124,45 @@ const STORED_PREFIX = 'vault1:';
 
 export const isVaultStored = (stored: string): boolean => stored.startsWith(STORED_PREFIX);
 export const toStored = (blob: Uint8Array): string => STORED_PREFIX + encodeBase64(blob);
+
+/** A Double Ratchet state sealed by the vault (F-1b phase 3) and its public view. */
+export interface SealedRatchet {
+  sealed: Uint8Array;
+  info: RatchetInfo;
+}
+
+/** What the ratchet refuses, with the messages the JavaScript ratchet used to throw. */
+function ratchetCheck(rc: number, what: string, noChain: string): void {
+  if (rc === AEGIS_OK) return;
+  if (rc === AEGIS_ENOKEY) throw new VaultKeyUnavailableError(what);
+  switch (rc) {
+    case AEGIS_ERATCHET_STATE:
+      throw new Error('Ratchet: sealed state rejected (another profile, tampered or corrupt)');
+    case AEGIS_ERATCHET_NO_CHAIN:
+      throw new Error(noChain);
+    case AEGIS_ERATCHET_TOO_MANY_SKIPPED:
+      throw new Error('Too many skipped messages');
+    case AEGIS_ERATCHET_LOW_ORDER:
+      throw new Error('Ratchet: all-zero DH output — low-order point attack');
+    case AEGIS_ERATCHET_DOWNGRADE:
+      throw new Error('Ratchet: missing PQ material on hybrid session — possible downgrade attack');
+    case AEGIS_ERATCHET_PQ:
+      throw new Error('Ratchet: bad or all-zero ML-KEM material');
+    default:
+      throw new Error(`vault: ${what} failed (${rc})`);
+  }
+}
+
+const ratchetBlobLen = (s: Uint8Array): number => BLOB_HEADER + 16 + 2 + s.length + RATCHET_STATE_LEN;
+
+/** Run a ratchet call that writes a new sealed state + info. */
+function sealedOut(slot: string, what: string, noChain: string, run: (blobOut: Uint8Array, info: Uint8Array, s: Uint8Array) => number): SealedRatchet {
+  const s = slotBytes(slot);
+  const sealed = new Uint8Array(ratchetBlobLen(s));
+  const info = new Uint8Array(RATCHET_INFO_LEN);
+  ratchetCheck(run(sealed, info, s), what, noChain);
+  return { sealed, info: decodeRatchetInfo(info) };
+}
 
 /** Bumped whenever keys are destroyed in bulk (lock, lockAll, destroyProfile): cached handles are stale. */
 let lockEpoch = 0;
@@ -261,6 +326,80 @@ export const vault = {
   generateStored(slot: string, type: VaultKeyType): { key: VaultKey; stored: string } {
     const { key, blob } = vault.generate(slot, type);
     return { key, stored: toStored(blob) };
+  },
+
+  // ── Double Ratchet (F-1b phase 3) ──────────────────────────────────────
+  // The state exists only inside the vault; JavaScript holds it sealed under
+  // the profile KEK and gets back a new sealed state from every step.
+
+  /** Alice's state: she sends first. `rootKey` (the X3DH output) is zeroed once the vault has it. */
+  ratchetInitAlice(slot: string, rootKey: Uint8Array, bobSpk: Uint8Array, bobPqSpk: Uint8Array | null): SealedRatchet {
+    try {
+      return sealedOut(slot, 'ratchetInitAlice', 'Ratchet: init failed', (o, i, s) =>
+        AegisSodium.ratchetInitAlice(o, i, s, rootKey, bobSpk, bobPqSpk ?? new Uint8Array(0)),
+      );
+    } finally {
+      rootKey.fill(0);
+    }
+  },
+
+  /** Bob's state: his SPK (and PQSPK, hybrid) handles are his initial pair; he keeps them. */
+  ratchetInitBob(rootKey: Uint8Array, spk: VaultKey, pqSpk: VaultKey | null): SealedRatchet {
+    try {
+      need(spk, 'x25519', 'ratchetInitBob');
+      if (pqSpk) {
+        need(pqSpk, 'mlkem768', 'ratchetInitBob');
+        if (pqSpk.slot !== spk.slot) throw new Error('vault: ratchetInitBob: SPK and PQSPK of different profiles');
+      }
+      return sealedOut(spk.slot, 'ratchetInitBob', 'Ratchet: init failed', (o, i, s) =>
+        AegisSodium.ratchetInitBob(o, i, s, rootKey, spk.handle, pqSpk ? pqSpk.handle : new Uint8Array(0)),
+      );
+    } finally {
+      rootKey.fill(0);
+    }
+  },
+
+  ratchetEncrypt(slot: string, state: Uint8Array, plaintext: Uint8Array): SealedRatchet & { header: RatchetHeader; ciphertext: Uint8Array; nonce: Uint8Array } {
+    const hdr = new Uint8Array(RATCHET_HEADER_LEN);
+    const box = new Uint8Array(24 + 16 + plaintext.length);
+    const out = sealedOut(slot, 'ratchetEncrypt', 'Cannot encrypt without a sender chain key', (o, i, s) =>
+      AegisSodium.ratchetEncrypt(o, i, hdr, box, s, state, plaintext),
+    );
+    return { ...out, header: unpackRatchetHeader(hdr), nonce: box.slice(0, 24), ciphertext: box.slice(24) };
+  },
+
+  /** The plaintext and the advanced state, or null when the message does not authenticate (state unchanged). */
+  ratchetDecrypt(slot: string, state: Uint8Array, header: RatchetHeader, ciphertext: Uint8Array, nonce: Uint8Array): (SealedRatchet & { plaintext: Uint8Array }) | null {
+    if (nonce.length !== 24 || ciphertext.length < 16) return null;
+    const hdr = packRatchetHeader(header);
+    const box = new Uint8Array(24 + ciphertext.length);
+    box.set(nonce, 0);
+    box.set(ciphertext, 24);
+    const m = new Uint8Array(ciphertext.length - 16);
+    const s = slotBytes(slot);
+    const sealed = new Uint8Array(ratchetBlobLen(s));
+    const info = new Uint8Array(RATCHET_INFO_LEN);
+    const rc = AegisSodium.ratchetDecrypt(sealed, info, m, s, state, hdr, box);
+    if (rc === AEGIS_EVERIFY) return null;
+    ratchetCheck(rc, 'ratchetDecrypt', 'No receiver chain key');
+    return { sealed, info: decodeRatchetInfo(info), plaintext: m };
+  },
+
+  /** Drop skipped message keys older than `Nr - maxAge`. */
+  ratchetTrim(slot: string, state: Uint8Array, maxAge: number): SealedRatchet {
+    return sealedOut(slot, 'ratchetTrim', 'Ratchet: trim failed', (o, i, s) => AegisSodium.ratchetTrim(o, i, s, state, maxAge));
+  },
+
+  /**
+   * A pre-F-1b session (raw state, `ratchetState.ts` layout) into the vault:
+   * the one-time migration of design doc section 4. `raw` is zeroed.
+   */
+  ratchetImport(slot: string, raw: Uint8Array): SealedRatchet {
+    try {
+      return sealedOut(slot, 'ratchetImport', 'Ratchet: import failed', (o, i, s) => AegisSodium.ratchetImport(o, i, s, raw));
+    } finally {
+      raw.fill(0);
+    }
   },
 
   /** Live handles (tests and leak checks). */

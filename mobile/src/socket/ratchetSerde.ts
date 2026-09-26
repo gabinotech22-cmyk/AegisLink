@@ -1,9 +1,14 @@
 /**
- * Ratchet state JSON revival.
+ * Ratchet session persistence.
  *
- * Ratchet sessions are persisted as JSON, so the raw key fields (RK/CKs/CKr/
- * DHr/DHs/MKSKIPPED) come back as one of several shapes depending on how they
- * were serialized: a Buffer JSON object ({type:'Buffer',data:[...]}), a plain
+ * Since F-1b phase 3 a session is persisted as its vault-sealed state plus
+ * non-secret metadata (format v3, below). Sessions saved before that are JSON
+ * with the raw keys (RK/CKs/CKr/DHr/DHs/MKSKIPPED/PQ*); they are imported into
+ * the vault ONCE when first loaded (design doc section 4) and re-saved as v3
+ * by the caller's next save.
+ *
+ * Revival of those legacy raw fields: they come back as one of several shapes
+ * depending on how they were serialized: a Buffer JSON object ({type:'Buffer',data:[...]}), a plain
  * number array, or a number-keyed object of byte values. We must reconstruct
  * the EXACT bytes — getting this wrong silently corrupts the ratchet and every
  * subsequent message fails to decrypt — while refusing anything that is not a
@@ -18,8 +23,9 @@
  * of desktop/src/renderer/socket/ratchetSerde.ts.
  */
 
-import type { RatchetState } from '../crypto/signal/ratchet';
-import { isVaultKey } from '../crypto/sodium/secretRef';
+import { encodeBase64, decodeBase64 } from 'tweetnacl-util';
+import type { RatchetState, RatchetInfo } from '../crypto/signal/ratchet';
+import { vault, encodeRatchetState, type SkippedKey } from '../crypto/sodium/vault';
 
 export function isBufferShape(o: unknown): o is { type: 'Buffer'; data: number[] } {
   return (
@@ -85,52 +91,150 @@ export function reviveMkSkipped(raw: unknown): Map<string, Uint8Array> {
 // the PQ secret (permanent one-way desync), and our own chain turns stopped
 // advertising PQ material (rejected by the peer as a downgrade attack).
 
-/** Serialize the minimal next-state of a ratchet session for persistence. */
-export function serializeRatchetState(state: RatchetState): string {
-  // F-1b phase 2: a receiver's initial DH/PQ pair is its SPK/PQSPK as a vault
-  // handle, consumed by the first ratchet step. Such a state is never persisted
-  // (it is only saved after a successful decrypt); if one ever got here, fail
-  // closed instead of writing a meaningless handle as the session key.
-  if (isVaultKey(state.DHs.secretKey) || (state.PQs && isVaultKey(state.PQs.secretKey))) {
-    throw new Error('ratchetSerde: refusing to persist a session still holding a vault handle (before its first ratchet step)');
-  }
-  return JSON.stringify({
-    RK: state.RK,
-    DHs: state.DHs,
-    DHr: state.DHr,
-    CKs: state.CKs,
-    CKr: state.CKr,
-    Ns: state.Ns,
-    Nr: state.Nr,
-    PN: state.PN,
-    // Hybrid PQ ratchet (R1) material — REQUIRED for hybrid sessions.
-    PQs: state.PQs,
-    PQr: state.PQr,
-    pqSendCt: state.pqSendCt,
-    MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
-    x3dhInit: state.x3dhInit,
-    createdAtMs: state.createdAtMs,
-  });
+/** Persisted format of a vault-sealed session. */
+const FORMAT = 3;
+
+interface PersistedV3 {
+  v: 3;
+  slot: string;
+  sealed: string;
+  info: { Ns: number; Nr: number; PN: number; hybrid: boolean; hasCKs: boolean; hasCKr: boolean; dhs: string; dhr: string | null };
+  x3dhInit?: RatchetState['x3dhInit'];
+  createdAtMs?: number;
 }
 
-/** Parse persisted JSON back into a live RatchetState (bytes revived). */
-export function reviveRatchetState(json: string): RatchetState {
+/** Serialize a session for persistence: the sealed state and its non-secret metadata. */
+export function serializeRatchetState(state: RatchetState): string {
+  const i = state.info;
+  const out: PersistedV3 = {
+    v: FORMAT,
+    slot: state.slot,
+    sealed: encodeBase64(state.sealed),
+    info: {
+      Ns: i.Ns,
+      Nr: i.Nr,
+      PN: i.PN,
+      hybrid: i.hybrid,
+      hasCKs: i.hasCKs,
+      hasCKr: i.hasCKr,
+      dhs: encodeBase64(i.dhsPublicKey),
+      dhr: i.dhr ? encodeBase64(i.dhr) : null,
+    },
+    x3dhInit: state.x3dhInit,
+    createdAtMs: state.createdAtMs,
+  };
+  return JSON.stringify(out);
+}
+
+/**
+ * Parse a persisted session of profile `slot`. A v3 session must be sealed to
+ * that profile (the vault refuses it otherwise on its next step, too); a
+ * legacy one is imported into the vault now, and the caller's next save
+ * persists it as v3.
+ */
+export function reviveRatchetState(json: string, slot: string): RatchetState {
   const s = JSON.parse(json);
-  s.RK = reviveBytes(s.RK);
-  s.CKs = reviveBytes(s.CKs);
-  s.CKr = reviveBytes(s.CKr);
-  s.DHr = reviveBytes(s.DHr);
-  s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-  s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-  // Hybrid PQ ratchet (R1): PQs/PQr/pqSendCt need the same byte revival as
-  // DHs/DHr — without this, a reloaded hybrid session has plain JSON
-  // arrays where ml_kem768.decapsulate/encapsulate expect Uint8Array.
-  if (s.PQs) {
-    s.PQs.publicKey = reviveBytes(s.PQs.publicKey);
-    s.PQs.secretKey = reviveBytes(s.PQs.secretKey);
+  if (s && s.v === FORMAT) {
+    const p = s as PersistedV3;
+    if (p.slot !== slot) throw new Error('ratchetSerde: session of another profile');
+    const info: RatchetInfo = {
+      Ns: p.info.Ns,
+      Nr: p.info.Nr,
+      PN: p.info.PN,
+      hybrid: p.info.hybrid,
+      hasCKs: p.info.hasCKs,
+      hasCKr: p.info.hasCKr,
+      dhsPublicKey: decodeBase64(p.info.dhs),
+      dhr: p.info.dhr ? decodeBase64(p.info.dhr) : null,
+    };
+    return { slot, sealed: decodeBase64(p.sealed), info, x3dhInit: p.x3dhInit, createdAtMs: p.createdAtMs };
   }
-  s.PQr = reviveBytes(s.PQr);
-  s.pqSendCt = reviveBytes(s.pqSendCt);
-  s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
-  return s as RatchetState;
+  return importLegacyRatchetState(s, slot);
+}
+
+/** Parse a legacy MKSKIPPED key `${base64(pub)}:${n}`. */
+function parseSkippedKey(k: string): { pub: Uint8Array; n: number } | null {
+  const idx = k.lastIndexOf(':');
+  if (idx < 0) return null;
+  const n = Number(k.slice(idx + 1));
+  if (!Number.isInteger(n) || n < 0 || n > 0xffffffff) return null;
+  try {
+    const pub = decodeBase64(k.slice(0, idx));
+    return pub.length === 32 ? { pub, n } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The one-time migration of a session saved before F-1b phase 3 (raw keys in
+ * JSON) into the vault. The raw copies are zeroed; a state that is not
+ * well-formed throws (fail closed: the session is re-keyed, never guessed).
+ */
+function importLegacyRatchetState(s: Record<string, unknown>, slot: string): RatchetState {
+  const need = (b: Uint8Array | null, len: number, what: string): Uint8Array => {
+    if (!b || b.length !== len) throw new Error(`ratchetSerde: legacy session: bad ${what}`);
+    return b;
+  };
+  const opt = (b: Uint8Array | null, len: number, what: string): Uint8Array | null => (b ? need(b, len, what) : null);
+  const counter = (v: unknown, what: string): number => {
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 0xffffffff) throw new Error(`ratchetSerde: legacy session: bad ${what}`);
+    return v;
+  };
+  const dhs = s.DHs as { publicKey?: unknown; secretKey?: unknown } | undefined;
+  const pqs = s.PQs as { publicKey?: unknown; secretKey?: unknown } | null | undefined;
+  const skipped: SkippedKey[] = [];
+  for (const [k, mk] of reviveMkSkipped(s.MKSKIPPED)) {
+    const parsed = parseSkippedKey(k);
+    if (parsed && mk.length === 32) skipped.push({ ...parsed, mk });
+  }
+  // The vault keeps the MAX_SKIPPED_KEYS highest-n keys; hand it at most that
+  // many (the lowest n go first, oldest first among equals, as before).
+  const keep = skipped
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => a.e.n - b.e.n || a.i - b.i)
+    .slice(Math.max(0, skipped.length - 50))
+    .sort((a, b) => a.i - b.i)
+    .map((x) => x.e);
+  const raw = {
+    DHs: {
+      publicKey: need(reviveBytes(dhs?.publicKey), 32, 'DHs.publicKey'),
+      secretKey: need(reviveBytes(dhs?.secretKey), 32, 'DHs.secretKey'),
+    },
+    DHr: opt(reviveBytes(s.DHr), 32, 'DHr'),
+    RK: need(reviveBytes(s.RK), 32, 'RK'),
+    PQs: pqs
+      ? {
+          publicKey: need(reviveBytes(pqs.publicKey), 1184, 'PQs.publicKey'),
+          secretKey: need(reviveBytes(pqs.secretKey), 2400, 'PQs.secretKey'),
+        }
+      : null,
+    PQr: opt(reviveBytes(s.PQr), 1184, 'PQr'),
+    pqSendCt: opt(reviveBytes(s.pqSendCt), 1088, 'pqSendCt'),
+    CKs: opt(reviveBytes(s.CKs), 32, 'CKs'),
+    CKr: opt(reviveBytes(s.CKr), 32, 'CKr'),
+    Ns: counter(s.Ns, 'Ns'),
+    Nr: counter(s.Nr, 'Nr'),
+    PN: counter(s.PN, 'PN'),
+    skipped: keep,
+  };
+  let encoded: Uint8Array;
+  try {
+    encoded = encodeRatchetState(raw);
+  } finally {
+    raw.DHs.secretKey.fill(0);
+    raw.RK.fill(0);
+    raw.CKs?.fill(0);
+    raw.CKr?.fill(0);
+    raw.PQs?.secretKey.fill(0);
+    for (const e of skipped) e.mk.fill(0);
+  }
+  const { sealed, info } = vault.ratchetImport(slot, encoded);
+  return {
+    slot,
+    sealed,
+    info,
+    x3dhInit: s.x3dhInit as RatchetState['x3dhInit'],
+    createdAtMs: typeof s.createdAtMs === 'number' ? s.createdAtMs : undefined,
+  };
 }

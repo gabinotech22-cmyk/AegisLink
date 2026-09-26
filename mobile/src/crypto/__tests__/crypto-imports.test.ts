@@ -52,6 +52,14 @@ describe('crypto primitives come only from src/crypto/sodium', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('no production file reaches the Jest stand-in (and its JavaScript ratchet): F-1b phase 3', () => {
+    // The Double Ratchet runs in the vault's C core; its TypeScript twin
+    // (modules/aegis-sodium/jest/ratchetCore.ts) is a test reference only.
+    const STANDIN = /(?:from\s+|require\()'[^']*modules\/aegis-sodium\/jest[^']*'/;
+    const offenders = files.filter((p) => STANDIN.test(fs.readFileSync(p, 'utf8')));
+    expect(offenders).toEqual([]);
+  });
+
   it('only the facade reaches the native libsodium module', () => {
     const offenders = files.filter(
       (p) => !p.startsWith(FACADE_DIR) && NATIVE_MODULE.test(fs.readFileSync(p, 'utf8')),

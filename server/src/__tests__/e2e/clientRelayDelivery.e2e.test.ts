@@ -137,8 +137,8 @@ async function makeRegisteredParty(deviceId: string): Promise<Party> {
 function pairSessions(shared: Uint8Array, bobSpk: nacl.BoxKeyPair): {
   alice: RatchetState; bob: RatchetState;
 } {
-  const alice = initRatchet(shared, bobSpk.publicKey, true);
-  const bob = initRatchet(new Uint8Array(shared), bobSpk.publicKey, false, bobSpk);
+  const alice = initRatchet('self', shared, bobSpk.publicKey, true);
+  const bob = initRatchet('self', new Uint8Array(shared), bobSpk.publicKey, false, bobSpk);
   return { alice, bob };
 }
 

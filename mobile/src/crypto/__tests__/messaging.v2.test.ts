@@ -40,8 +40,8 @@ function setupSession() {
   );
 
   const bobSpkPub = decodeBase64(bob.bundle.signedPreKey.publicKeyB64);
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true);
-  const bobState = initRatchet(bobRoot, new Uint8Array(), false, {
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true);
+  const bobState = initRatchet('self', bobRoot, new Uint8Array(), false, {
     publicKey: bobSpkPub,
     secretKey: pk(bob.secrets.signedPreKey.secretStored),
   });
@@ -114,7 +114,7 @@ describe('sealed-sender v2 1:1 messaging', () => {
       aliceState,
       NOW,
     );
-    const eveState = initRatchet(new Uint8Array(32), bob.identity.publicKey, true);
+    const eveState = initRatchet('self', new Uint8Array(32), bob.identity.publicKey, true);
     const dec = decryptMessageV2(wire, eve.identity.secretKey, () => signingPub(alice.identity), eveState, NOW);
     expect(dec).toBeNull();
   });

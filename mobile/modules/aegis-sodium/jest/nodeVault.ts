@@ -1,7 +1,8 @@
 /**
  * Jest stand-in for the C key vault (`../cpp/aegis_vault.c`, F-1b). Same
- * contract: the same blob format ("AV" | 1 | type | nonce | secretbox(slotlen |
- * slot | key)), the same return codes, slot binding, release and lock. The
+ * contract: the same blob format ("AV" | 2 | type | nonce | secretbox(type |
+ * slotlen | slot | key)), the same return codes, slot binding, release and
+ * lock, and the sealed ratchet states of phase 3 (`nodeRatchet.ts`). The
  * "Keychain/Keystore" is an in-memory map that survives lock/unlock (like the
  * OS store survives app restarts) and is cleared by vaultDestroyProfile.
  *
@@ -12,6 +13,7 @@ import sodium from 'sodium-native';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import { sha3_256 } from '@noble/hashes/sha3.js';
 import type { AegisSodiumNative } from '../index';
+import { makeNodeRatchet, type RatchetMethods } from './nodeRatchet';
 
 const OK = 0;
 const EVERIFY = 1;
@@ -45,7 +47,12 @@ const isBytes = (b: unknown): b is Uint8Array => b instanceof Uint8Array;
 const key = (slot: Uint8Array): string => Buffer.from(slot).toString('hex');
 
 /** The vault plus a synchronous unlock for test setup (the native one is async only because it reads the OS keystore). */
-export type NodeVault = VaultMethods & { unlockNow(slot: string): void };
+export type NodeVault = VaultMethods &
+  RatchetMethods & {
+    unlockNow(slot: string): void;
+    /** TEST ONLY: the raw state inside a sealed ratchet blob (`nodeRatchet.ts`). */
+    ratchetPeek: ReturnType<typeof makeNodeRatchet>['peek'];
+  };
 
 export function makeNodeVault(p: Prims): NodeVault {
   const keystore = new Map<string, Uint8Array>(); // slot → KEK (the "OS store")
@@ -127,7 +134,45 @@ export function makeNodeVault(p: Prims): NodeVault {
     if (!unlocked.has(key(s))) unlocked.set(key(s), Uint8Array.from(kek));
   }
 
+  // Sealed ratchet states (F-1b phase 3): blobs of type 6, a fixed-size state
+  // instead of a key. Never loadable as a key (KEY_LEN has no type 6).
+  const ratchet = makeNodeRatchet({
+    blobLen: (slot, len) => blobLen(slot.length, len),
+    slotOk,
+    seal: (blob, slot, type, plain) => {
+      if (!unlocked.has(key(slot))) return ENOKEY;
+      return wrap(blob, slot, type, plain);
+    },
+    open: (slot, type, blob) => {
+      const kek = unlocked.get(key(slot));
+      if (!kek) return ENOKEY;
+      if (blob.length < HEADER + 18 || blob[0] !== 0x41 || blob[1] !== 0x56 || blob[2] !== VERSION || blob[3] !== type) return EBADLEN;
+      const plain = new Uint8Array(blob.length - HEADER - 16);
+      if (!sodium.crypto_secretbox_open_easy(plain, blob.subarray(HEADER), blob.subarray(4, 28), kek)) return EVERIFY;
+      if (plain[0] !== type || plain[1] !== slot.length || !Buffer.from(plain.subarray(2, 2 + slot.length)).equals(Buffer.from(slot))) {
+        plain.fill(0);
+        return EVERIFY;
+      }
+      const out = plain.slice(2 + slot.length);
+      plain.fill(0);
+      return out;
+    },
+    secretOf: (h, type, slot) => {
+      const id = readHandle(h);
+      if (id === null) return EBADLEN;
+      const k = keys.get(id);
+      return k && k.type === type && k.slot === key(slot) ? Uint8Array.from(k.secret) : ENOKEY;
+    },
+  });
+
   return {
+    ratchetInitAlice: ratchet.ratchetInitAlice,
+    ratchetInitBob: ratchet.ratchetInitBob,
+    ratchetEncrypt: ratchet.ratchetEncrypt,
+    ratchetDecrypt: ratchet.ratchetDecrypt,
+    ratchetTrim: ratchet.ratchetTrim,
+    ratchetImport: ratchet.ratchetImport,
+    ratchetPeek: ratchet.peek,
     vaultUnlock: async (slot) => unlockNow(slot),
     unlockNow,
     vaultDestroyProfile: async (slot) => {

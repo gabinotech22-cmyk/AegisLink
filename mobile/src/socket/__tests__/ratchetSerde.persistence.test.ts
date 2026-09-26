@@ -15,7 +15,7 @@
  * reloaded on the next).
  */
 
-import { decodeBase64, decodeUTF8, encodeUTF8 } from 'tweetnacl-util';
+import { decodeBase64, decodeUTF8, encodeUTF8, encodeBase64 } from 'tweetnacl-util';
 
 import { runAnonymousOnboarding } from '../../crypto/onboarding';
 import { performX3DH, performX3DHReceiver, generatePreKeys } from '../../crypto/signal/x3dh';
@@ -27,10 +27,11 @@ import {
 } from '../../crypto/signal/ratchet';
 import { serializeRatchetState, reviveRatchetState } from '../ratchetSerde';
 import { pk, pkOrNull } from '../../crypto/__tests__/helpers/rawIdentity';
+import { peek } from '../../crypto/__tests__/helpers/ratchetPeek';
 
 /** Persist + reload — the exact save/load cycle the socket client performs. */
 function roundTrip(state: RatchetState): RatchetState {
-  return reviveRatchetState(serializeRatchetState(state));
+  return reviveRatchetState(serializeRatchetState(state), state.slot);
 }
 
 function newHybridPair(): { aliceState: RatchetState; bobState: RatchetState } {
@@ -70,8 +71,9 @@ function newHybridPair(): { aliceState: RatchetState; bobState: RatchetState } {
 
   const bobSpkPub = decodeBase64(bobPreKeys.signedPreKey.publicKeyB64);
   const bobPqPub = decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64);
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true, undefined, null, bobPqPub);
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true, undefined, null, bobPqPub);
   const bobState = initRatchet(
+    'self',
     bobRoot,
     new Uint8Array(),
     false,
@@ -87,13 +89,13 @@ describe('serializeRatchetState — hybrid PQ material survives persistence', ()
     const { aliceState } = newHybridPair();
     const reloaded = roundTrip(aliceState);
 
-    expect(reloaded.PQs).toBeTruthy();
-    expect(reloaded.PQs!.publicKey).toBeInstanceOf(Uint8Array);
-    expect(reloaded.PQs!.secretKey).toBeInstanceOf(Uint8Array);
-    expect(reloaded.PQs!.publicKey.length).toBe(1184);
-    expect(reloaded.PQr).toBeInstanceOf(Uint8Array);
-    expect(reloaded.pqSendCt).toBeInstanceOf(Uint8Array);
-    expect(reloaded.pqSendCt!.length).toBe(1088);
+    expect(reloaded.info.hybrid).toBe(true);
+    const raw = peek(reloaded);
+    expect(raw.PQs).toBeTruthy();
+    expect(raw.PQs!.publicKey.length).toBe(1184);
+    expect(raw.PQs!.secretKey.length).toBe(2400);
+    expect(raw.PQr).toBeInstanceOf(Uint8Array);
+    expect(raw.pqSendCt!.length).toBe(1088);
   });
 
   it('hybrid ping-pong stays in sync with persistence between EVERY step (the live bug)', () => {
@@ -104,10 +106,8 @@ describe('serializeRatchetState — hybrid PQ material survives persistence', ()
       const a = ratchetEncrypt(aliceState, decodeUTF8(`a${i}`));
       aliceState = roundTrip(aliceState);
 
-      // Bob (also persisted+reloaded) decrypts Alice's chain turn. Not before
-      // his FIRST decrypt: until then his state holds his SPK/PQSPK as vault
-      // handles (F-1b phase 2), which the app never persists (next test).
-      if (i > 0) bobState = roundTrip(bobState);
+      // Bob (also persisted+reloaded) decrypts Alice's chain turn.
+      bobState = roundTrip(bobState);
       const gotA = ratchetDecrypt(bobState, a.header, a.ciphertext, a.nonce);
       expect(gotA).not.toBeNull();
       expect(encodeUTF8(gotA!)).toBe(`a${i}`);
@@ -128,13 +128,11 @@ describe('serializeRatchetState — hybrid PQ material survives persistence', ()
     }
   });
 
-  it('refuses to persist a receiver state that still holds its SPK/PQSPK handles (F-1b)', () => {
+  it('a receiver state persists before its first decrypt (sealed, no handle inside) (F-1b phase 3)', () => {
     const { aliceState, bobState } = newHybridPair();
-    expect(() => serializeRatchetState(bobState)).toThrow(/vault handle/);
-    // After the first decrypt the handles are gone (fresh ratchet keys): it persists.
+    const reloaded = roundTrip(bobState);
     const a0 = ratchetEncrypt(aliceState, decodeUTF8('hi'));
-    expect(ratchetDecrypt(bobState, a0.header, a0.ciphertext, a0.nonce)).not.toBeNull();
-    expect(() => serializeRatchetState(bobState)).not.toThrow();
+    expect(encodeUTF8(ratchetDecrypt(reloaded, a0.header, a0.ciphertext, a0.nonce)!)).toBe('hi');
   });
 
   it('a reloaded hybrid session still attaches PQ material on its next chain turn', () => {
@@ -151,5 +149,64 @@ describe('serializeRatchetState — hybrid PQ material survives persistence', ()
     // downgrade attack.
     expect(reply.header.pqPub).toBeDefined();
     expect(reply.header.pqCt).toBeDefined();
+  });
+});
+
+describe('persisted form (F-1b phase 3): only the sealed state leaves the vault', () => {
+  it('the JSON holds the sealed blob and non-secret metadata, never a key field', () => {
+    const { aliceState } = newHybridPair();
+    const json = JSON.parse(serializeRatchetState(aliceState));
+    expect(Object.keys(json).sort()).toEqual(['createdAtMs', 'info', 'sealed', 'slot', 'v'].sort());
+    expect(json.v).toBe(3);
+    for (const k of ['RK', 'CKs', 'CKr', 'DHs', 'MKSKIPPED', 'PQs']) expect(json[k]).toBeUndefined();
+    expect(Object.keys(json.info).sort()).toEqual(['Ns', 'Nr', 'PN', 'dhr', 'dhs', 'hasCKr', 'hasCKs', 'hybrid'].sort());
+  });
+
+  it('a session of another profile is refused', () => {
+    const { aliceState } = newHybridPair();
+    expect(() => reviveRatchetState(serializeRatchetState(aliceState), 'otherprofile')).toThrow(/another profile/);
+  });
+
+  it('a tampered sealed state fails closed', () => {
+    const { aliceState } = newHybridPair();
+    const bad = { ...aliceState, sealed: Uint8Array.from(aliceState.sealed) };
+    bad.sealed[bad.sealed.length - 1] ^= 1;
+    expect(() => ratchetEncrypt(bad, decodeUTF8('x'))).toThrow(/sealed state rejected/);
+  });
+
+  it('a pre-phase-3 session (raw keys in JSON, skipped keys included) is imported once and keeps working', () => {
+    const { aliceState, bobState } = newHybridPair();
+    // Bob misses a0, gets a1: a0's key lands in the skipped keys.
+    const a0 = ratchetEncrypt(aliceState, decodeUTF8('a0'));
+    const a1 = ratchetEncrypt(aliceState, decodeUTF8('a1'));
+    expect(encodeUTF8(ratchetDecrypt(bobState, a1.header, a1.ciphertext, a1.nonce)!)).toBe('a1');
+    // Write Bob's state the way the app did before phase 3.
+    const r = peek(bobState);
+    const arr = (b: Uint8Array | null) => (b ? Array.from(b) : null);
+    const legacy = JSON.stringify({
+      RK: arr(r.RK),
+      DHs: { publicKey: arr(r.DHs.publicKey), secretKey: arr(r.DHs.secretKey) },
+      DHr: arr(r.DHr),
+      CKs: arr(r.CKs),
+      CKr: arr(r.CKr),
+      Ns: r.Ns,
+      Nr: r.Nr,
+      PN: r.PN,
+      PQs: r.PQs ? { publicKey: arr(r.PQs.publicKey), secretKey: arr(r.PQs.secretKey) } : null,
+      PQr: arr(r.PQr),
+      pqSendCt: arr(r.pqSendCt),
+      MKSKIPPED: r.skipped.map((e) => [`${encodeBase64(e.pub)}:${e.n}`, Array.from(e.mk)]),
+      createdAtMs: 1234,
+    });
+    const imported = reviveRatchetState(legacy, 'self');
+    expect(imported.createdAtMs).toBe(1234);
+    expect(peek(imported).skipped).toHaveLength(1);
+    expect(encodeUTF8(ratchetDecrypt(imported, a0.header, a0.ciphertext, a0.nonce)!)).toBe('a0');
+    // And it now persists as v3.
+    expect(JSON.parse(serializeRatchetState(imported)).v).toBe(3);
+  });
+
+  it('a malformed pre-phase-3 session fails closed instead of guessing bytes', () => {
+    expect(() => reviveRatchetState(JSON.stringify({ RK: [1, 2, 3], DHs: { publicKey: [], secretKey: [] }, Ns: 0, Nr: 0, PN: 0 }), 'self')).toThrow(/legacy session/);
   });
 });

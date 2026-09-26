@@ -169,6 +169,7 @@ import type { Identity } from '../../crypto/identity';
 import { deriveAegisId } from '../../crypto/identity';
 import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
 import { vault } from '../../crypto/sodium/vault';
+import { serializeRatchetState } from '../ratchetSerde';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
@@ -196,28 +197,18 @@ function buildResetNudge(me: Identity, peer: Identity) {
   // `peer` (the requester) is Alice; it sends the nudge over an ESTABLISHED
   // session (no x3dh header on the wire — a normal ratchet message).
   const x3dh = performX3DH(peer, bundle);
-  const peerSender = initRatchet(x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
+  const peerSender = initRatchet('self', x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
   delete peerSender.x3dhInit; // NUDGE, not an init
 
   // `me` holds the matching Bob session so it can decrypt the nudge.
   const spkPub = nacl.scalarMult.base(spk.secretKey);
-  const meSession = initRatchet(x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), false, {
+  const meSession = initRatchet('self', x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), false, {
     publicKey: spkPub,
     secretKey: spk.secretKey,
   });
   delete meSession.x3dhInit;
   meSession.createdAtMs = Date.now() - 120_000;
-  const serial = {
-    RK: Array.from(meSession.RK),
-    DHs: { publicKey: Array.from(meSession.DHs.publicKey), secretKey: Array.from(meSession.DHs.secretKey as Uint8Array) },
-    DHr: meSession.DHr ? Array.from(meSession.DHr) : null,
-    CKs: meSession.CKs ? Array.from(meSession.CKs) : null,
-    CKr: meSession.CKr ? Array.from(meSession.CKr) : null,
-    Ns: meSession.Ns, Nr: meSession.Nr, PN: meSession.PN,
-    MKSKIPPED: [],
-    createdAtMs: meSession.createdAtMs,
-  };
-  mockRatchetSessions.set(peer.aegisId, JSON.stringify(serial));
+  mockRatchetSessions.set(peer.aegisId, serializeRatchetState(meSession));
 
   const resetPayload = JSON.stringify({
     type: 'profile_update',

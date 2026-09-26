@@ -33,7 +33,7 @@ function aliceInitState() {
   const alice = runAnonymousOnboarding(5);
   const bob = runAnonymousOnboarding(5);
   const x = performX3DH(alice.identity, bob.bundle);
-  const state = initRatchet(x.rootKey, decodeBase64(bob.bundle.signedPreKey.publicKeyB64), true);
+  const state = initRatchet('self', x.rootKey, decodeBase64(bob.bundle.signedPreKey.publicKeyB64), true);
   state.x3dhInit = { aliceEKB64: x.myEphemeralPublicKeyB64, spkId: bob.bundle.signedPreKey.keyId, opkId: bob.bundle.oneTimePreKey?.keyId ?? null };
   const fc: FirstContactBlock = { ik: alice.identity.publicKeyB64, relay: ONION, root: encodeBase64(nacl.randomBytes(32)) };
   return { alice, bob, state, fc };

@@ -32,6 +32,14 @@ const EBADLEN = -1;
 const EFAIL = -2;
 export { OK as AEGIS_OK, EVERIFY as AEGIS_EVERIFY, EBADLEN as AEGIS_EBADLEN, EFAIL as AEGIS_EFAIL };
 export const AEGIS_ENOKEY = -3;
+export {
+  AEGIS_ERATCHET_STATE,
+  AEGIS_ERATCHET_NO_CHAIN,
+  AEGIS_ERATCHET_TOO_MANY_SKIPPED,
+  AEGIS_ERATCHET_LOW_ORDER,
+  AEGIS_ERATCHET_DOWNGRADE,
+  AEGIS_ERATCHET_PQ,
+} from './ratchetCodes';
 
 const MAC = 16;
 const NONCE = 24;
@@ -273,5 +281,8 @@ const nodeBackend: AegisSodiumNative = { ...base, ...vaultImpl };
 
 /** Test setup: unlock a profile synchronously (see jest/vaultSetup.ts). */
 export const unlockVaultNow = (slot: string): void => vaultImpl.unlockNow(slot);
+
+/** TEST ONLY: the raw ratchet state sealed in `sealed` (no such call exists in the native module). */
+export const peekRatchet = (slot: string, sealed: Uint8Array) => vaultImpl.ratchetPeek(new TextEncoder().encode(slot), sealed);
 
 export default nodeBackend;
