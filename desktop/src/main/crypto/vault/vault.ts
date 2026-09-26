@@ -292,6 +292,48 @@ export class KeyVault {
     return this.keys.size;
   }
 
+  // ── Sealed payloads of the main process (the ratchet state, `ratchet.ts`) ──
+  // Not reachable over IPC: `ops.ts` exposes the ratchet operations, never these.
+
+  /** Seal `plain` as a v2 blob of type id `typeId` (not a key type) for `slot`. */
+  sealPayload(slot: string, typeId: number, plain: Uint8Array): Uint8Array {
+    this.requireUnlocked(slot);
+    return this.wrapId(slot, typeId, plain);
+  }
+
+  /** Open a blob of `typeId` sealed for `slot`: exactly `len` bytes, or REJECTED. The caller zeroes it. */
+  openPayload(slot: string, typeId: number, blob: Uint8Array, len: number): Uint8Array {
+    checkSlot(slot);
+    const s = Buffer.from(slot, 'ascii');
+    const rejected = (): VaultError => new VaultError('REJECTED', 'Ratchet: sealed state rejected (another profile, tampered or corrupt)');
+    if (!(blob instanceof Uint8Array) || blob.length !== HEADER + 16 + 2 + s.length + len) throw rejected();
+    if (blob[0] !== 0x41 || blob[1] !== 0x56 || blob[2] !== VERSION || blob[3] !== typeId) throw rejected();
+    const kek = this.keks.get(slot);
+    if (!kek) throw new VaultError('NOKEY', 'profile locked');
+    const plain = sodium.sodium_malloc(blob.length - HEADER - 16);
+    try {
+      const ok = this.withKek(kek, () =>
+        sodium.crypto_secretbox_open_easy(plain, blob.subarray(HEADER), blob.subarray(4, HEADER), kek),
+      );
+      if (!ok || plain[0] !== typeId || plain[1] !== s.length || !Buffer.from(plain.subarray(2, 2 + s.length)).equals(s)) {
+        throw rejected();
+      }
+      return Uint8Array.from(plain.subarray(2 + s.length));
+    } finally {
+      sodium.sodium_memzero(plain);
+    }
+  }
+
+  /** A copy of the secret of `handle` if it serves `type` and belongs to `slot`. The caller zeroes it. */
+  readSecret(handle: number, type: VaultKeyType, slot: string): Uint8Array {
+    const e = this.entry(handle, type);
+    // Only a key of this very profile: a session of one profile never starts from another's prekey.
+    if (e.slot !== slot) throw new VaultError('NOKEY', 'key not available (locked, released or of another type)');
+    const out = new Uint8Array(KEY_LEN[e.type]);
+    this.use(handle, type, (secret) => out.set(secret));
+    return out;
+  }
+
   // ── internals ──────────────────────────────────────────────────────────
 
   private requireUnlocked(slot: string): void {
@@ -306,17 +348,21 @@ export class KeyVault {
   }
 
   private wrap(slot: string, type: VaultKeyType, secret: Uint8Array): Uint8Array {
+    return this.wrapId(slot, TYPE_ID[type], secret);
+  }
+
+  private wrapId(slot: string, typeId: number, secret: Uint8Array): Uint8Array {
     const kek = this.keks.get(slot);
     if (!kek) throw new VaultError('NOKEY', 'profile locked');
     const s = Buffer.from(slot, 'ascii');
     const plain = sodium.sodium_malloc(2 + s.length + secret.length);
     try {
-      plain[0] = TYPE_ID[type];
+      plain[0] = typeId;
       plain[1] = s.length;
       plain.set(s, 2);
       plain.set(secret, 2 + s.length);
       const blob = new Uint8Array(HEADER + 16 + plain.length);
-      blob.set([0x41, 0x56, VERSION, TYPE_ID[type]]);
+      blob.set([0x41, 0x56, VERSION, typeId]);
       sodium.randombytes_buf(blob.subarray(4, HEADER));
       this.withKek(kek, () => sodium.crypto_secretbox_easy(blob.subarray(HEADER), plain, blob.subarray(4, HEADER), kek));
       return blob;

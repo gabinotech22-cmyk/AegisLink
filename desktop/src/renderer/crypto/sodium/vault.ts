@@ -92,6 +92,51 @@ const STORED_PREFIX = 'vault1:';
 export const isVaultStored = (stored: string): boolean => stored.startsWith(STORED_PREFIX);
 export const toStored = (blob: Uint8Array): string => STORED_PREFIX + encodeBase64(blob);
 
+/** Non-secret view of a Double Ratchet state (counters, public keys): what the renderer may see. */
+export interface RatchetInfo {
+  Ns: number;
+  Nr: number;
+  PN: number;
+  hybrid: boolean;
+  hasCKs: boolean;
+  hasCKr: boolean;
+  dhsPublicKey: Uint8Array;
+  dhr: Uint8Array | null;
+}
+
+export interface RatchetHeader {
+  ratchetKey: Uint8Array;
+  n: number;
+  pn: number;
+  pqPub?: Uint8Array;
+  pqCt?: Uint8Array;
+}
+
+/** A Double Ratchet state sealed by the vault (F-1b phase 3) and its public view. */
+export interface SealedRatchet {
+  sealed: Uint8Array;
+  info: RatchetInfo;
+}
+
+/**
+ * A pre-F-1b session's raw state, revived from the renderer's old JSON — only
+ * for `vault.ratchetImport`, the one-time migration (design doc section 4).
+ */
+export interface LegacyRatchetState {
+  DHs: { publicKey: Uint8Array; secretKey: Uint8Array };
+  DHr: Uint8Array | null;
+  RK: Uint8Array;
+  PQs: { publicKey: Uint8Array; secretKey: Uint8Array } | null;
+  PQr: Uint8Array | null;
+  pqSendCt: Uint8Array | null;
+  CKs: Uint8Array | null;
+  CKr: Uint8Array | null;
+  Ns: number;
+  Nr: number;
+  PN: number;
+  skipped: { pub: Uint8Array; n: number; mk: Uint8Array }[];
+}
+
 /** Bumped whenever keys are destroyed in bulk (lock, lockAll, destroyProfile): cached handles are stale. */
 let lockEpoch = 0;
 
@@ -200,5 +245,56 @@ export const vault = {
   },
   liveKeys(): number {
     return call<number>('liveKeys');
+  },
+
+  // ── Double Ratchet (F-1b phase 3) ──────────────────────────────────────
+  // The state runs in the main process and reaches the renderer only sealed
+  // under the profile KEK; every step returns a new sealed state.
+
+  /** Alice's state. The vault gets a copy of `rootKey`; the caller zeroes its own. */
+  ratchetInitAlice(slot: string, rootKey: Uint8Array, bobSpk: Uint8Array, bobPqSpk: Uint8Array | null): SealedRatchet {
+    return call<SealedRatchet>('ratchetInitAlice', slot, rootKey, bobSpk, bobPqSpk);
+  },
+  /** Bob's state: his SPK (and PQSPK, hybrid) handles are his initial pair; he keeps them. */
+  ratchetInitBob(rootKey: Uint8Array, spk: VaultKey, pqSpk: VaultKey | null): SealedRatchet {
+    need(spk, 'x25519', 'ratchetInitBob');
+    if (pqSpk) {
+      need(pqSpk, 'mlkem768', 'ratchetInitBob');
+      if (pqSpk.slot !== spk.slot) throw new Error('vault: ratchetInitBob: SPK and PQSPK of different profiles');
+    }
+    return call<SealedRatchet>('ratchetInitBob', spk.slot, rootKey, spk.handle, pqSpk ? pqSpk.handle : null);
+  },
+  ratchetEncrypt(slot: string, state: Uint8Array, plaintext: Uint8Array): SealedRatchet & { header: RatchetHeader; nonce: Uint8Array; ciphertext: Uint8Array } {
+    return call('ratchetEncrypt', slot, state, plaintext);
+  },
+  /** The plaintext and the advanced state, or null when the message does not authenticate (state unchanged). */
+  ratchetDecrypt(slot: string, state: Uint8Array, header: RatchetHeader, ciphertext: Uint8Array, nonce: Uint8Array): (SealedRatchet & { plaintext: Uint8Array }) | null {
+    if (nonce.length !== 24 || ciphertext.length < 16) return null;
+    const box = new Uint8Array(24 + ciphertext.length);
+    box.set(nonce, 0);
+    box.set(ciphertext, 24);
+    const h: RatchetHeader = { ratchetKey: header.ratchetKey, n: header.n, pn: header.pn };
+    if (header.pqPub && header.pqCt) {
+      h.pqPub = header.pqPub;
+      h.pqCt = header.pqCt;
+    }
+    return call('ratchetDecrypt', slot, state, h, box);
+  },
+  /** Drop skipped message keys older than `Nr - maxAge`. */
+  ratchetTrim(slot: string, state: Uint8Array, maxAge: number): SealedRatchet {
+    return call<SealedRatchet>('ratchetTrim', slot, state, maxAge);
+  },
+  /** One-time migration of a pre-F-1b session into the vault; the raw copies are zeroed. */
+  ratchetImport(slot: string, raw: LegacyRatchetState): SealedRatchet {
+    try {
+      return call<SealedRatchet>('ratchetImport', slot, raw);
+    } finally {
+      raw.DHs.secretKey.fill(0);
+      raw.RK.fill(0);
+      raw.CKs?.fill(0);
+      raw.CKr?.fill(0);
+      raw.PQs?.secretKey.fill(0);
+      for (const e of raw.skipped) e.mk.fill(0);
+    }
   },
 };

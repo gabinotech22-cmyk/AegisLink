@@ -28,8 +28,8 @@ import { vk } from '../../crypto/__tests__/helpers/rawIdentity';
 function pairedRatchets(): { alice: RatchetState; bob: RatchetState } {
   const rootKey = nacl.randomBytes(32);
   const bobSpk = nacl.box.keyPair();
-  const alice = initRatchet(rootKey, bobSpk.publicKey, true);
-  const bob = initRatchet(rootKey, new Uint8Array(0), false, bobSpk);
+  const alice = initRatchet('self', rootKey, bobSpk.publicKey, true);
+  const bob = initRatchet('self', rootKey, new Uint8Array(0), false, bobSpk);
   return { alice, bob };
 }
 

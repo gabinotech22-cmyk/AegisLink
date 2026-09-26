@@ -220,8 +220,13 @@ raw keys leave only for the explicit exports (backup, device link, recovery
 phrase — on desktop after a native confirmation dialog;
 [`F1B-KEY-VAULT-DESIGN.md`](F1B-KEY-VAULT-DESIGN.md) §5). Phase 2 (done) did the
 same for the prekeys (SPK, OPKs, PQSPK): generated, stored and used by handle,
-including the receiver's first ratchet step. The per-turn ratchet keys are still
-in JavaScript until phase 3. Status: [`docs/ROADMAP.md`](ROADMAP.md) Hito 3.
+including the receiver's first ratchet step. Phase 3 (done) moved the **Double
+Ratchet itself** into the vault (mobile C core `aegis_ratchet.c`, desktop main
+process): root, chain and message keys and the per-turn DH / ML-KEM pairs exist
+only there while a step runs, and JavaScript persists the state sealed under the
+profile KEK. The wire is unchanged. What still passes through JS once per session
+is the X3DH output (root key) and the sender's X3DH ephemeral, zeroed as soon as
+the vault holds the session. Status: [`docs/ROADMAP.md`](ROADMAP.md) Hito 3.
 ML-KEM-768 runs only on the clients: native libsodium on mobile, and
 `@noble/post-quantum` 0.7.1 in the desktop's main process (F-1b phase 2; never
 in the renderer); the relay never encapsulates
@@ -894,8 +899,8 @@ on desktop, `lock/__tests__/coldLock.test.ts` on both).
   runs in JavaScript — on desktop, ML-KEM-768 (in the main process), legacy PBKDF2 and Argon2id — is constant-time at the
   source level only, not through the JIT and GC. Practical exploitation requires a local co-resident oracle, which
   already implies endpoint compromise. Identity keys and prekeys no longer pass
-  through the JS heap (F-1b phases 1b and 2); the per-turn ratchet keys still do
-  (F-1b phase 3, §10).
+  through the JS heap, and neither does the Double Ratchet state (F-1b phases
+  1b–3, §10); only the X3DH output crosses JS once per new session.
 
 ---
 

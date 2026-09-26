@@ -148,6 +148,7 @@ jest.mock('socket.io-client', () => ({
 import type { Identity } from '../../crypto/identity';
 import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
 import { vault } from '../../crypto/sodium/vault';
+import { serializeRatchetState } from '../ratchetSerde';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
@@ -172,7 +173,7 @@ function buildDesyncedEnvelope(me: Identity, peer: Identity, createdAtMs: number
     oneTimePreKey: null,
   };
   const x3dh = performX3DH(peer, bundle);
-  const senderState = initRatchet(x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
+  const senderState = initRatchet('self', x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
 
   // Encrypt a normal (NON-x3dh-init) message — clear x3dhInit so no headers go on the wire.
   delete senderState.x3dhInit;
@@ -186,20 +187,10 @@ function buildDesyncedEnvelope(me: Identity, peer: Identity, createdAtMs: number
   // already sent messages before desyncing.
   const wrongDHr = nacl.box.keyPair();
   const wrongRoot = nacl.randomBytes(32);
-  const desyncedState: RatchetState = initRatchet(wrongRoot, wrongDHr.publicKey, true);
+  const desyncedState: RatchetState = initRatchet('self', wrongRoot, wrongDHr.publicKey, true);
   delete desyncedState.x3dhInit;
   desyncedState.createdAtMs = createdAtMs;
-  const serial = {
-    RK: Array.from(desyncedState.RK),
-    DHs: { publicKey: Array.from(desyncedState.DHs.publicKey), secretKey: Array.from(desyncedState.DHs.secretKey as Uint8Array) },
-    DHr: desyncedState.DHr ? Array.from(desyncedState.DHr) : null,
-    CKs: desyncedState.CKs ? Array.from(desyncedState.CKs) : null,
-    CKr: desyncedState.CKr ? Array.from(desyncedState.CKr) : null,
-    Ns: desyncedState.Ns, Nr: desyncedState.Nr, PN: desyncedState.PN,
-    MKSKIPPED: [],
-    createdAtMs: desyncedState.createdAtMs,
-  };
-  mockRatchetSessions.set(peer.aegisId, JSON.stringify(serial));
+  mockRatchetSessions.set(peer.aegisId, serializeRatchetState(desyncedState));
 
   return { id: 'env-1', from: peer.aegisId, to: me.aegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 };
 }

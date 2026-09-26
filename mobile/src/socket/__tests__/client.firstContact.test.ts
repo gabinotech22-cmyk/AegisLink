@@ -274,7 +274,7 @@ function strangerBootstrapWire(alice: Identity, me: Identity, text: string) {
     oneTimePreKey: null,
   };
   const x = performX3DH(alice, bundle);
-  const state = initRatchet(x.rootKey, spk.publicKey, true);
+  const state = initRatchet('self', x.rootKey, spk.publicKey, true);
   state.x3dhInit = { aliceEKB64: x.myEphemeralPublicKeyB64, spkId: 1, opkId: null };
   const root = encodeBase64(nacl.randomBytes(32));
   const payload = JSON.stringify({ type: 'text', text });
@@ -469,7 +469,7 @@ describe('federation F3b — first contact across relays', () => {
     mockIdentityState.identity = me;
     // Established-style v2 (no x3dh/fc) from someone we do not know.
     const spk = nacl.box.keyPair();
-    const state = initRatchet(nacl.randomBytes(32), spk.publicKey, true);
+    const state = initRatchet('self', nacl.randomBytes(32), spk.publicKey, true);
     delete state.x3dhInit;
     const { wire } = encryptMessageV2(JSON.stringify({ type: 'text', text: 'x' }), alice.aegisId, me.publicKey, alice.signingSecretKey, state, Date.now());
 

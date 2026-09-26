@@ -56,6 +56,12 @@ internal object AegisSodiumNative {
   @JvmStatic external fun vaultMlkem768Dec(handle: ByteBuffer?, ss: ByteBuffer?, ct: ByteBuffer?): Int
   @JvmStatic external fun vaultExport(handle: ByteBuffer?, type: Int, out: ByteBuffer?): Int
   @JvmStatic external fun vaultLiveKeys(): Int
+  @JvmStatic external fun ratchetInitAlice(blob: ByteBuffer?, info: ByteBuffer?, slot: ByteBuffer?, rk: ByteBuffer?, dhr: ByteBuffer?, pqr: ByteBuffer?): Int
+  @JvmStatic external fun ratchetInitBob(blob: ByteBuffer?, info: ByteBuffer?, slot: ByteBuffer?, rk: ByteBuffer?, spk: ByteBuffer?, pqspk: ByteBuffer?): Int
+  @JvmStatic external fun ratchetEncrypt(blobOut: ByteBuffer?, info: ByteBuffer?, hdr: ByteBuffer?, box: ByteBuffer?, slot: ByteBuffer?, blob: ByteBuffer?, m: ByteBuffer?): Int
+  @JvmStatic external fun ratchetDecrypt(blobOut: ByteBuffer?, info: ByteBuffer?, m: ByteBuffer?, slot: ByteBuffer?, blob: ByteBuffer?, hdr: ByteBuffer?, box: ByteBuffer?): Int
+  @JvmStatic external fun ratchetTrim(blobOut: ByteBuffer?, info: ByteBuffer?, slot: ByteBuffer?, blob: ByteBuffer?, maxAge: Int): Int
+  @JvmStatic external fun ratchetImport(blobOut: ByteBuffer?, info: ByteBuffer?, slot: ByteBuffer?, raw: ByteBuffer?): Int
   @JvmStatic external fun mlkem768Keypair(pk: ByteBuffer?, sk: ByteBuffer?): Int
   @JvmStatic external fun mlkem768SeedKeypair(pk: ByteBuffer?, sk: ByteBuffer?, seed: ByteBuffer?): Int
   @JvmStatic external fun mlkem768Enc(ct: ByteBuffer?, ss: ByteBuffer?, pk: ByteBuffer?): Int
@@ -259,6 +265,25 @@ class AegisSodiumModule : Module() {
       AegisSodiumNative.vaultExport(b(handle), type, b(out))
     }
     Function("vaultLiveKeys") { AegisSodiumNative.vaultLiveKeys() }
+    // ── Double Ratchet in the vault (F-1b phase 3): the state crosses JS only sealed.
+    Function("ratchetInitAlice") { blob: Uint8Array, info: Uint8Array, slot: Uint8Array, rk: Uint8Array, dhr: Uint8Array, pqr: Uint8Array ->
+      AegisSodiumNative.ratchetInitAlice(b(blob), b(info), b(slot), b(rk), b(dhr), b(pqr))
+    }
+    Function("ratchetInitBob") { blob: Uint8Array, info: Uint8Array, slot: Uint8Array, rk: Uint8Array, spk: Uint8Array, pqspk: Uint8Array ->
+      AegisSodiumNative.ratchetInitBob(b(blob), b(info), b(slot), b(rk), b(spk), b(pqspk))
+    }
+    Function("ratchetEncrypt") { blobOut: Uint8Array, info: Uint8Array, hdr: Uint8Array, box: Uint8Array, slot: Uint8Array, blob: Uint8Array, m: Uint8Array ->
+      AegisSodiumNative.ratchetEncrypt(b(blobOut), b(info), b(hdr), b(box), b(slot), b(blob), b(m))
+    }
+    Function("ratchetDecrypt") { blobOut: Uint8Array, info: Uint8Array, m: Uint8Array, slot: Uint8Array, blob: Uint8Array, hdr: Uint8Array, box: Uint8Array ->
+      AegisSodiumNative.ratchetDecrypt(b(blobOut), b(info), b(m), b(slot), b(blob), b(hdr), b(box))
+    }
+    Function("ratchetTrim") { blobOut: Uint8Array, info: Uint8Array, slot: Uint8Array, blob: Uint8Array, maxAge: Int ->
+      AegisSodiumNative.ratchetTrim(b(blobOut), b(info), b(slot), b(blob), maxAge)
+    }
+    Function("ratchetImport") { blobOut: Uint8Array, info: Uint8Array, slot: Uint8Array, raw: Uint8Array ->
+      AegisSodiumNative.ratchetImport(b(blobOut), b(info), b(slot), b(raw))
+    }
     AsyncFunction("pbkdf2Sha256") { pwd: ByteArray, salt: ByteArray, iterations: Int, outLen: Int ->
       pbkdf2Sha256(pwd, salt, iterations, outLen)
     }

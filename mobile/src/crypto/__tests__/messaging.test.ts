@@ -35,8 +35,8 @@ function setupSession() {
   );
 
   const bobSpkPub = decodeBase64(bob.bundle.signedPreKey.publicKeyB64);
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true);
-  const bobState = initRatchet(bobRoot, new Uint8Array(), false, {
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true);
+  const bobState = initRatchet('self', bobRoot, new Uint8Array(), false, {
     publicKey: bobSpkPub,
     secretKey: pk(bob.secrets.signedPreKey.secretStored),
   });
@@ -86,7 +86,7 @@ describe('1:1 messaging', () => {
       alice.identity.secretKey,
       aliceState,
     );
-    const eveState = initRatchet(nacl.randomBytes(32), nacl.box.keyPair().publicKey, true);
+    const eveState = initRatchet('self', nacl.randomBytes(32), nacl.box.keyPair().publicKey, true);
     const dec = tryDecryptMessage(envelope, alice.identity.publicKey, eve.identity.secretKey, eveState);
     expect(dec).toBeNull();
   });
@@ -118,11 +118,11 @@ describe('1:1 messaging', () => {
     );
     // A pristine ratchet state that never saw message n=0 cannot jump ahead.
     const freshBob = initRatchet(
-      // wrong root key entirely -> chain keys never agree
+      'self', // wrong root key entirely -> chain keys never agree
       nacl.randomBytes(32),
       new Uint8Array(),
       false,
-      { publicKey: bobState.DHs.publicKey, secretKey: bobState.DHs.secretKey },
+      nacl.box.keyPair(),
     );
     const dec = tryDecryptMessage(envelope, alice.identity.publicKey, bob.identity.secretKey, freshBob);
     expect(dec).toBeNull();

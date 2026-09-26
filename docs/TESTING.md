@@ -321,8 +321,12 @@ hallazgo sube tal cual.
   aleatorias y vectores RFC 7748/8032/4231/5869, Argon2id idéntico a @noble (aleatorio, con los
   parámetros exactos del PIN `a4`/`a3` y del backup v3, y un vector de referencia) y sus límites de
   parámetros, `EBADLEN` en toda longitud errónea, `NULL` solo con
-  longitud 0, fallo cerrado con puntos de orden bajo y la firma universal de orden pequeño. Dos
-  pasadas: `-O2` y ASan+UBSan. En local:
+  longitud 0, fallo cerrado con puntos de orden bajo y la firma universal de orden pequeño. Además
+  corre `test/ratchet-interop.mjs` (F-1b fase 3): conversaciones del Double Ratchet en C contra su
+  gemelo TypeScript (`jest/ratchetCore.ts`) en los dos sentidos, clásicas e híbridas, con desorden,
+  pérdidas, falsificaciones y replays; diferencial del estado sellado (el test conoce la KEK) y los
+  códigos de error (sin cadena, demasiados saltados, orden bajo, downgrade, estado manipulado o de
+  otro perfil, perfil bloqueado, importación). Dos pasadas: `-O2` y ASan+UBSan. En local:
   `cmake -S modules/aegis-sodium/test -B build/aegis-sodium -G Ninja && ninja -C build/aegis-sodium && node modules/aegis-sodium/test/differential.mjs build/aegis-sodium/aegis_sodium_cli`
   (desde `mobile/`). Android arm64 lo compila el job de build smoke.
 - **Argon2id en dispositivo**: el flujo Maestro `mobile/.maestro/03-app-lock-pin.yaml` (job

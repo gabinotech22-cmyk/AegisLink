@@ -182,6 +182,7 @@ import type { Identity } from '../../crypto/identity';
 import { deriveAegisId } from '../../crypto/identity';
 import { identityFromRaw } from '../../crypto/__tests__/helpers/rawIdentity';
 import { vault } from '../../crypto/sodium/vault';
+import { serializeRatchetState } from '../ratchetSerde';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
@@ -204,7 +205,7 @@ function buildDesyncedEnvelope(me: Identity, peer: Identity, createdAtMs: number
     oneTimePreKey: null,
   };
   const x3dh = performX3DH(peer, bundle);
-  const senderState = initRatchet(x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
+  const senderState = initRatchet('self', x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
   delete senderState.x3dhInit;
   const { envelope } = encryptMessage('hola', peer.aegisId, me.publicKey, peer.secretKey, senderState);
 
@@ -216,20 +217,10 @@ function buildDesyncedEnvelope(me: Identity, peer: Identity, createdAtMs: number
   // still fully serialisable/encryptable.
   const wrongDHr = nacl.box.keyPair();
   const wrongRoot = nacl.randomBytes(32);
-  const desyncedState: RatchetState = initRatchet(wrongRoot, wrongDHr.publicKey, true);
+  const desyncedState: RatchetState = initRatchet('self', wrongRoot, wrongDHr.publicKey, true);
   delete desyncedState.x3dhInit;
   desyncedState.createdAtMs = createdAtMs;
-  const serial = {
-    RK: Array.from(desyncedState.RK),
-    DHs: { publicKey: Array.from(desyncedState.DHs.publicKey), secretKey: Array.from(desyncedState.DHs.secretKey as Uint8Array) },
-    DHr: desyncedState.DHr ? Array.from(desyncedState.DHr) : null,
-    CKs: desyncedState.CKs ? Array.from(desyncedState.CKs) : null,
-    CKr: desyncedState.CKr ? Array.from(desyncedState.CKr) : null,
-    Ns: desyncedState.Ns, Nr: desyncedState.Nr, PN: desyncedState.PN,
-    MKSKIPPED: [],
-    createdAtMs: desyncedState.createdAtMs,
-  };
-  mockRatchetSessions.set(peer.aegisId, JSON.stringify(serial));
+  mockRatchetSessions.set(peer.aegisId, serializeRatchetState(desyncedState));
 
   return { id: 'env-desync', from: peer.aegisId, to: me.aegisId, ciphertext: envelope.ciphertextB64, nonce: envelope.nonceB64 };
 }
@@ -254,7 +245,7 @@ function buildInitFromHigher(higher: Identity, me: Identity, slotSpkKey: string)
   const x3dh = performX3DH(higher, bundle);
   // Keep the higher peer's live sender state so we can send a SECOND message
   // over the SAME converged session and prove the lower peer decrypts it.
-  const senderState = initRatchet(x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
+  const senderState = initRatchet('self', x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
   senderState.x3dhInit = { aliceEKB64: x3dh.myEphemeralPublicKeyB64, spkId: 1, opkId: null };
   const init = JSON.stringify({ type: 'direct_msg', text: 'init-hello' });
   const { envelope, newState } = encryptMessage(init, higher.aegisId, me.publicKey, higher.secretKey, senderState);

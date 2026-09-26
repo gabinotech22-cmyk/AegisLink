@@ -18,7 +18,7 @@ import { decodeBase64, encodeBase64, encodeUTF8, decodeUTF8 } from 'tweetnacl-ut
 
 import { runAnonymousOnboarding } from '../onboarding';
 import { performX3DH, performX3DHReceiver } from '../signal/x3dh';
-import {
+import { cloneState,
   initRatchet,
   ratchetEncrypt,
   ratchetDecrypt,
@@ -48,8 +48,8 @@ function setupSession() {
 
   // Bob's initial DHs MUST be his SPK pair (per ratchet.ts contract)
   const bobSpkPub = decodeBase64(bob.bundle.signedPreKey.publicKeyB64);
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true);
-  const bobState = initRatchet(bobRoot, new Uint8Array(), false, {
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true);
+  const bobState = initRatchet('self', bobRoot, new Uint8Array(), false, {
     publicKey: bobSpkPub,
     secretKey: bobSpkSec,
   });
@@ -112,11 +112,7 @@ describe('Double Ratchet', () => {
     ratchetDecrypt(bobState, m1.header, m1.ciphertext, m1.nonce);
 
     // Snapshot a STALE copy of Bob's state before he hears from Alice again.
-    const staleBob = {
-      ...bobState,
-      MKSKIPPED: new Map(bobState.MKSKIPPED),
-      DHs: { ...bobState.DHs },
-    };
+    const staleBob = cloneState(bobState);
 
     // Bob now sends a reply, triggering his own DH ratchet on next receive.
     const reply = ratchetEncrypt(bobState, decodeUTF8('reply'));
@@ -154,9 +150,9 @@ describe('tryDecryptMessage state isolation', () => {
       aliceState,
     );
 
-    const ckrBefore = bobState.CKr ? encodeBase64(bobState.CKr) : null;
-    const nrBefore = bobState.Nr;
-    const dhrBefore = bobState.DHr ? encodeBase64(bobState.DHr) : null;
+    // The sealed state is the whole state: unchanged bytes ⇒ unchanged session.
+    const sealedBefore = encodeBase64(bobState.sealed);
+    const infoBefore = { ...bobState.info };
 
     const res = tryDecryptMessage(
       envelope,
@@ -170,9 +166,8 @@ describe('tryDecryptMessage state isolation', () => {
     // The advanced state must be a NEW object, never the caller's live state.
     expect(res!.newState).not.toBe(bobState);
     // The caller's original state must be byte-for-byte unchanged.
-    expect(bobState.CKr ? encodeBase64(bobState.CKr) : null).toBe(ckrBefore);
-    expect(bobState.Nr).toBe(nrBefore);
-    expect(bobState.DHr ? encodeBase64(bobState.DHr) : null).toBe(dhrBefore);
+    expect(encodeBase64(bobState.sealed)).toBe(sealedBefore);
+    expect(bobState.info).toEqual(infoBefore);
   });
 
   it('does not advance caller state when decryption fails (corrupt inner ciphertext)', () => {
@@ -203,8 +198,8 @@ describe('tryDecryptMessage state isolation', () => {
       nonceB64: encodeBase64(outerNonce),
     };
 
-    const ckrBefore = bobState.CKr ? encodeBase64(bobState.CKr) : null;
-    const nrBefore = bobState.Nr;
+    const sealedBefore = encodeBase64(bobState.sealed);
+    const infoBefore = { ...bobState.info };
 
     const res = tryDecryptMessage(
       corruptEnvelope,
@@ -215,8 +210,8 @@ describe('tryDecryptMessage state isolation', () => {
     expect(res).toBeNull();
     // Caller state untouched despite the inner chain key having "advanced"
     // inside the discarded clone.
-    expect(bobState.CKr ? encodeBase64(bobState.CKr) : null).toBe(ckrBefore);
-    expect(bobState.Nr).toBe(nrBefore);
+    expect(encodeBase64(bobState.sealed)).toBe(sealedBefore);
+    expect(bobState.info).toEqual(infoBefore);
   });
 });
 
@@ -315,14 +310,14 @@ describe('encryptMessage padding (FND-04)', () => {
       alice.identity.aegisId,
       bob.identity.publicKey,
       alice.identity.secretKey,
-      { ...aliceState, MKSKIPPED: new Map(aliceState.MKSKIPPED) },
+      cloneState(aliceState),
     );
     const long = encryptMessage(
       'a'.repeat(5000),
       alice.identity.aegisId,
       bob.identity.publicKey,
       alice.identity.secretKey,
-      { ...aliceState, MKSKIPPED: new Map(aliceState.MKSKIPPED) },
+      cloneState(aliceState),
     );
 
     const shortLen = decodeBase64(short.envelope.ciphertextB64).length;
@@ -344,7 +339,7 @@ describe('encryptMessage padding (FND-04)', () => {
       alice.identity.aegisId,
       bob.identity.publicKey,
       alice.identity.secretKey,
-      { ...aliceState, MKSKIPPED: new Map(aliceState.MKSKIPPED) },
+      cloneState(aliceState),
     );
     expect(decodeBase64(otherShort.envelope.ciphertextB64).length).toBe(shortLen);
   });

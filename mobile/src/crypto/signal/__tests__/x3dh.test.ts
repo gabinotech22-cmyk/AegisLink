@@ -12,6 +12,7 @@ import { initRatchet, ratchetEncrypt, ratchetDecrypt } from '../ratchet';
 import { type Identity } from '../../identity';
 import { identityFromRaw } from '../../__tests__/helpers/rawIdentity';
 import { pk, pkOrNull } from '../../__tests__/helpers/rawIdentity';
+import { peek } from '../../__tests__/helpers/ratchetPeek';
 
 function buildIdentity(): Identity {
   const box = nacl.box.keyPair();
@@ -222,7 +223,7 @@ describe('X3DH + Double Ratchet fresh-session first-message roundtrip', () => {
     // Alice
     const aliceX3DH = performX3DH(alice, bundle);
     const aliceState = initRatchet(
-      aliceX3DH.rootKey,
+      'self', aliceX3DH.rootKey,
       decodeBase64(bundle.signedPreKey.publicKeyB64),
       true,
     );
@@ -240,7 +241,7 @@ describe('X3DH + Double Ratchet fresh-session first-message roundtrip', () => {
       decodeBase64(aliceX3DH.myEphemeralPublicKeyB64),
     );
     const spkPub = mySpkSecret.publicKey;
-    const bobState = initRatchet(bobRoot, header.ratchetKey, false, {
+    const bobState = initRatchet('self', bobRoot, header.ratchetKey, false, {
       publicKey: spkPub,
       secretKey: mySpkSecret,
     });
@@ -477,7 +478,7 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
     const aliceX3DH = performX3DH(alice, bundle);
     expect(aliceX3DH.version).toBe(2);
     const aliceState = initRatchet(
-      aliceX3DH.rootKey,
+      'self', aliceX3DH.rootKey,
       decodeBase64(bundle.signedPreKey.publicKeyB64),
       true,
     );
@@ -497,7 +498,7 @@ describe('PQXDH v2 — hybrid post-quantum handshake', () => {
       },
     );
     const spkPub = pk(bobPreKeys.signedPreKey.secretStored).publicKey;
-    const bobState = initRatchet(bobRoot, header.ratchetKey, false, {
+    const bobState = initRatchet('self', bobRoot, header.ratchetKey, false, {
       publicKey: spkPub,
       secretKey: pk(bobPreKeys.signedPreKey.secretStored),
     });
@@ -542,7 +543,7 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     // Alice seeds Bob's PQSPK public key as her initial PQr (mirrors
     // socket/client.ts's getOrCreateSessionLocked).
     const aliceState = initRatchet(
-      aliceX3DH.rootKey,
+      'self', aliceX3DH.rootKey,
       decodeBase64(bundle.signedPreKey.publicKeyB64),
       true,
       undefined,
@@ -574,7 +575,7 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     // socket/client.ts's decryptAndAppendLocked).
     const spkPub = pk(bobPreKeys.signedPreKey.secretStored).publicKey;
     const bobState = initRatchet(
-      bobRoot,
+      'self', bobRoot,
       first.header.ratchetKey,
       false,
       { publicKey: spkPub, secretKey: pk(bobPreKeys.signedPreKey.secretStored) },
@@ -595,15 +596,15 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     // Assertions already happened inside establishHybridSession(); this just
     // confirms it doesn't throw and both sides came back hybrid.
     const { aliceState, bobState } = establishHybridSession();
-    expect(aliceState.PQs).toBeTruthy();
-    expect(bobState.PQs).toBeTruthy();
+    expect(aliceState.info.hybrid).toBe(true);
+    expect(bobState.info.hybrid).toBe(true);
   });
 
   it('survives multiple round-trip chain turns, each rotating PQ material', () => {
     const { aliceState, bobState } = establishHybridSession();
 
     // Capture PQ pubkeys before each turn to prove they actually rotate.
-    const alicePqPubRound1 = encodeBase64(aliceState.PQs!.publicKey);
+    const alicePqPubRound1 = encodeBase64(peek(aliceState).PQs!.publicKey);
 
     // Bob replies — this is a NEW sending chain for Bob, so his ratchetEncrypt
     // attaches HIS fresh pqPub/pqCt (encapsulated to Alice's PQr he just
@@ -618,7 +619,7 @@ describe('R1 hybrid PQ Double Ratchet (per-chain-turn ML-KEM mixing)', () => {
     expect(encodeBase64(aliceOut1!)).toBe(encodeBase64(reply1Plaintext));
 
     // Alice's PQ keypair rotated when she dh-ratcheted on Bob's reply.
-    const alicePqPubRound2 = encodeBase64(aliceState.PQs!.publicKey);
+    const alicePqPubRound2 = encodeBase64(peek(aliceState).PQs!.publicKey);
     expect(alicePqPubRound2).not.toBe(alicePqPubRound1);
 
     // One more round trip the other way to confirm steady-state symmetry.

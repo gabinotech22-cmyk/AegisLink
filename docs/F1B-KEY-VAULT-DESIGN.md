@@ -1,6 +1,6 @@
 # F-1b — Bóveda de claves nativa (claves privadas fuera de la memoria de JavaScript)
 
-> Estado: **DISEÑO v1** (2026-09-25); fases 1a, 1b y 2 implementadas (§5 describe lo que se hizo de
+> Estado: **DISEÑO v1** (2026-09-25); fases 1a, 1b, 2 y 3 implementadas (F-1b completo) (§5 describe lo que se hizo de
 > verdad en las exportaciones). Alcance aprobado por el dueño: **fases 1, 2 y 3**, mobile y
 > desktop; UnifiedPush va después. Estado de cada fase: `docs/ROADMAP.md` → Hito 3 (fuente única).
 > Reglas de oro: #1 (fail-closed), #5 (paridad), #8 (constant-time), #9 (zeroizar), #11 (un test por
@@ -85,9 +85,17 @@ El Double Ratchet del receptor arranca con su SPK/PQSPK como par inicial: el rat
 handle (`crypto/sodium/secretRef.ts`), lo consume en el primer paso y nunca lo persiste
 (`ratchetSerde` se niega). La SPK que va a los dispositivos vinculados del usuario (vincular y
 sincronización tras rotar) es una exportación explícita (§5). Las claves por turno del ratchet
-siguen en JS hasta la fase 3.
+salen de JS en la fase 3.
 
-**Fase 3** en móvil: el ratchet se porta al C core; el estado se persiste como blob sellado con la
+**Fase 3 (hecha):** en móvil el ratchet está portado al C core (`cpp/aegis_ratchet.c`); cada
+llamada abre el estado sellado en memoria guarded, da el paso y sella un estado NUEVO (el viejo
+queda intacto: un mensaje que no autentica no deja rastro). El estado es de tamaño fijo (9464 B,
+`ratchetState.ts`) y se sella como blob de tipo 6, que nunca carga como clave. En escritorio el
+mismo algoritmo (gemelo TS, `main/crypto/vault/ratchetCore.ts`) corre en el proceso main. JS guarda
+`{v:3, slot, sealed, info}`; `info` son contadores y claves públicas. Las sesiones anteriores se
+importan una vez al cargarlas. Límite honesto: la salida del X3DH (clave raíz) y la efímera del
+emisor siguen pasando por JS una vez por sesión nueva y se ponen a cero en cuanto la bóveda tiene
+la sesión (mover el X3DH entero a la bóveda sería una fase aparte). Diseño original: en móvil el ratchet se porta al C core; el estado se persiste como blob sellado con la
 KEK (JS guarda el blob en SQLite, como hoy guarda el JSON). En escritorio el ratchet corre en el
 proceso main (TypeScript sobre `sodium-native`), con el mismo estado sellado: las claves no llegan
 al renderer. El formato del wire y el de los mensajes no cambia; los estados guardados se migran

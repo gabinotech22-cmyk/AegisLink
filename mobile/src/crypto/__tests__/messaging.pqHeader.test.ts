@@ -64,8 +64,9 @@ function newHybridPair(): {
   const bobSpkPub = decodeBase64(bobPreKeys.signedPreKey.publicKeyB64);
   const bobPqPub = decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64);
 
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true, undefined, null, bobPqPub);
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true, undefined, null, bobPqPub);
   const bobState = initRatchet(
+    'self',
     bobRoot,
     new Uint8Array(),
     false,

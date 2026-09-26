@@ -141,8 +141,8 @@ short version:
   main process), legacy-backup PBKDF2 and Argon2id are still constant-time JS
   (`@noble`), whose guarantee is source-level, not verified
   through the JIT+GC. Identity keys and prekeys live only in a native key vault
-  (F-1b phases 1b and 2); the per-turn ratchet keys are still handed to native
-  code from JS memory (F-1b phase 3). Practical exploitation would require an already-compromised
+  and so does the Double Ratchet state (F-1b phases 1b–3); only the X3DH output
+  crosses JS memory once per new session. Practical exploitation would require an already-compromised
   device ([docs/PROTOCOL.md §2.1](docs/PROTOCOL.md)).
 - **iOS push goes through Apple.** On iPhone the only way to wake a closed app
   is Apple's APNs: the relay sends a generic wake-up with no content or sender,

@@ -204,44 +204,6 @@ async function deleteStagedChannelFile(path: string | undefined): Promise<void> 
   } catch { /* best-effort */ }
 }
 
-/** Revive JSON-deserialized byte fields back into Uint8Array. Mirrors client.ts logic. */
-function reviveBytes(o: unknown): Uint8Array | null {
-  if (o === null || o === undefined) return null;
-  if (o instanceof Uint8Array) return o;
-  if (Array.isArray(o) && o.every((x) => typeof x === 'number')) return new Uint8Array(o);
-  if (
-    typeof o === 'object' &&
-    (o as { type?: unknown }).type === 'Buffer' &&
-    Array.isArray((o as { data?: unknown }).data)
-  ) {
-    return new Uint8Array((o as { data: number[] }).data);
-  }
-  if (typeof o === 'object' && !Array.isArray(o) && o !== null) {
-    const keys = Object.keys(o as object);
-    if (keys.length > 0 && keys.every((k) => /^\d+$/.test(k))) {
-      const out = new Uint8Array(keys.length);
-      for (let i = 0; i < keys.length; i++) {
-        out[i] = (o as Record<string, number>)[String(i)];
-      }
-      return out;
-    }
-  }
-  return null;
-}
-
-function reviveMkSkipped(raw: unknown): Map<string, Uint8Array> {
-  const out = new Map<string, Uint8Array>();
-  if (!Array.isArray(raw)) return out;
-  for (const entry of raw) {
-    if (!Array.isArray(entry) || entry.length !== 2) continue;
-    const [k, v] = entry as [unknown, unknown];
-    if (typeof k !== 'string') continue;
-    const bytes = reviveBytes(v);
-    if (bytes) out.set(k, bytes);
-  }
-  return out;
-}
-
 interface ScheduledState {
   scheduled: ScheduledMessage[];
 
@@ -308,6 +270,7 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
     const { loadRatchetSession, saveRatchetSession } = require('../db/local') as typeof import('../db/local');
     const { decodeBase64 } = require('tweetnacl-util') as typeof import('tweetnacl-util');
     const { trimOldSkippedKeys, MAX_SKIPPED_KEYS } = require('../crypto/signal/ratchet') as typeof import('../crypto/signal/ratchet');
+    const { reviveRatchetState, serializeRatchetState } = require('../socket/ratchetSerde') as typeof import('../socket/ratchetSerde');
     const { getSocket, isConnected } = require('../socket/client') as typeof import('../socket/client');
 
     const { useIdentity } = require('./identity') as typeof import('./identity');
@@ -328,15 +291,9 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
     const existingJson = await loadRatchetSession(recipientAegisId);
 
     if (existingJson) {
-      const s = JSON.parse(existingJson);
-      s.RK = reviveBytes(s.RK);
-      s.CKs = reviveBytes(s.CKs);
-      s.CKr = reviveBytes(s.CKr);
-      s.DHr = reviveBytes(s.DHr);
-      s.DHs.publicKey = reviveBytes(s.DHs.publicKey);
-      s.DHs.secretKey = reviveBytes(s.DHs.secretKey);
-      s.MKSKIPPED = reviveMkSkipped(s.MKSKIPPED);
-      session = s as import('../crypto/signal/ratchet').RatchetState;
+      // The one (de)serializer. A hand-rolled copy here used to drop the hybrid
+      // PQ fields and re-save the session without them (a permanent desync).
+      session = reviveRatchetState(existingJson, identity.secretKey.slot);
     } else {
       // Need a socket to fetch prekeys (X3DH Alice side)
       const sock = getSocket();
@@ -362,7 +319,8 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
       if (contact.signingPublicKeyB64) bundle.signingPublicKeyB64 = contact.signingPublicKeyB64;
 
       const x3dh = performX3DH(identity, bundle);
-      session = initRatchet(x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
+      session = initRatchet(identity.secretKey.slot, x3dh.rootKey, decodeBase64(bundle.signedPreKey.publicKeyB64), true);
+      x3dh.rootKey.fill(0); // the vault holds its own copy now
       session.x3dhInit = {
         aliceEKB64: x3dh.myEphemeralPublicKeyB64,
         spkId: bundle.signedPreKey.keyId,
@@ -381,19 +339,7 @@ export const useScheduledMessages = create<ScheduledState>((set, get) => ({
 
     // Persist updated ratchet state
     trimOldSkippedKeys(newState, MAX_SKIPPED_KEYS);
-    const serialized = {
-      RK: newState.RK,
-      DHs: newState.DHs,
-      DHr: newState.DHr,
-      CKs: newState.CKs,
-      CKr: newState.CKr,
-      Ns: newState.Ns,
-      Nr: newState.Nr,
-      PN: newState.PN,
-      MKSKIPPED: Array.from(newState.MKSKIPPED.entries()),
-      x3dhInit: newState.x3dhInit,
-    };
-    await saveRatchetSession(recipientAegisId, JSON.stringify(serialized));
+    await saveRatchetSession(recipientAegisId, serializeRatchetState(newState));
 
     // The wire envelope — only ciphertext, never plaintext
     const msgId = Crypto.randomUUID();

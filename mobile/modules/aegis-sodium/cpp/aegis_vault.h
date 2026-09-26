@@ -102,6 +102,58 @@ int aegis_vault_export(uint32_t handle, int type, uint8_t *out, size_t outlen);
 /* Number of live handles (tests / leak checks). */
 size_t aegis_vault_live_keys(void);
 
+/*
+ * ── Double Ratchet in the vault (F-1b phase 3, aegis_ratchet.c) ─────────────
+ *
+ * The ratchet state (root, chain and message keys, our DH and ML-KEM pairs)
+ * lives only here while a step runs; it leaves the core sealed under the
+ * profile KEK as a blob of type AEGIS_KEY_RATCHET, which never loads as a key
+ * (and no key blob opens as a state). Every step reads a sealed state and
+ * writes a NEW one: the old one is untouched, so a message that does not
+ * authenticate leaves the session as it was. The algorithm and the wire are
+ * those of the app's former JavaScript ratchet (its TypeScript twin:
+ * jest/ratchetCore.ts; state layout: ratchetState.ts).
+ *
+ * Buffers: blob = AEGIS_RATCHET_BLOB_LEN(slotlen); info (non-secret view:
+ * counters and public keys) = AEGIS_RATCHET_INFO_LEN; hdr (packed message
+ * header) = AEGIS_RATCHET_HEADER_LEN; box = nonce(24) | secretbox ciphertext.
+ */
+#define AEGIS_KEY_RATCHET 6
+#define AEGIS_RATCHET_MAX_SKIPPED 50
+#define AEGIS_RATCHET_STATE_LEN 9464
+#define AEGIS_RATCHET_HEADER_LEN 2313
+#define AEGIS_RATCHET_INFO_LEN 77
+#define AEGIS_RATCHET_BLOB_LEN(slotlen) AEGIS_VAULT_BLOB_LEN(slotlen, AEGIS_RATCHET_STATE_LEN)
+
+/* Ratchet return codes (besides OK, EVERIFY = message does not authenticate, EBADLEN, EFAIL, ENOKEY). */
+#define AEGIS_ERATCHET_STATE -10            /* sealed state does not open / malformed */
+#define AEGIS_ERATCHET_NO_CHAIN -11         /* no sending (encrypt) or receiving (decrypt) chain */
+#define AEGIS_ERATCHET_TOO_MANY_SKIPPED -12 /* more than AEGIS_RATCHET_MAX_SKIPPED skipped in one jump */
+#define AEGIS_ERATCHET_LOW_ORDER -13        /* all-zero X25519 output */
+#define AEGIS_ERATCHET_DOWNGRADE -14        /* hybrid chain turn without its ML-KEM material */
+#define AEGIS_ERATCHET_PQ -15               /* bad / all-zero ML-KEM material */
+
+/* Alice: a fresh sending chain toward Bob's SPK `dhr` (32) and, hybrid, his PQSPK `pqr` (1184; empty = classic). */
+int aegis_ratchet_init_alice(uint8_t *blob, size_t bloblen, uint8_t *info, size_t infolen, const uint8_t *slot,
+                             size_t slotlen, const uint8_t *rk, size_t rklen, const uint8_t *dhr, size_t dhrlen,
+                             const uint8_t *pqr, size_t pqrlen);
+/* Bob: his SPK handle (X25519 prekey of `slot`) and, hybrid, PQSPK handle (0 = classic) are his initial pair. */
+int aegis_ratchet_init_bob(uint8_t *blob, size_t bloblen, uint8_t *info, size_t infolen, const uint8_t *slot,
+                           size_t slotlen, const uint8_t *rk, size_t rklen, uint32_t spk, uint32_t pqspk);
+int aegis_ratchet_encrypt(uint8_t *blob_out, size_t bloblen, uint8_t *info, size_t infolen, uint8_t *hdr,
+                          size_t hdrlen, uint8_t *box, size_t boxlen, const uint8_t *slot, size_t slotlen,
+                          const uint8_t *blob, size_t blobinlen, const uint8_t *m, size_t mlen);
+/* EVERIFY: the message does not authenticate; nothing is written. */
+int aegis_ratchet_decrypt(uint8_t *blob_out, size_t bloblen, uint8_t *info, size_t infolen, uint8_t *m, size_t mlen,
+                          const uint8_t *slot, size_t slotlen, const uint8_t *blob, size_t blobinlen,
+                          const uint8_t *hdr, size_t hdrlen, const uint8_t *box, size_t boxlen);
+/* Drop skipped message keys older than Nr - max_age. */
+int aegis_ratchet_trim(uint8_t *blob_out, size_t bloblen, uint8_t *info, size_t infolen, const uint8_t *slot,
+                       size_t slotlen, const uint8_t *blob, size_t blobinlen, uint32_t max_age);
+/* One-time migration of a pre-F-1b session: a raw state (AEGIS_RATCHET_STATE_LEN, ratchetState.ts layout). */
+int aegis_ratchet_import(uint8_t *blob_out, size_t bloblen, uint8_t *info, size_t infolen, const uint8_t *slot,
+                         size_t slotlen, const uint8_t *raw, size_t rawlen);
+
 #ifdef __cplusplus
 }
 #endif

@@ -47,8 +47,8 @@ function setupSession(): Pair {
   );
 
   const bobSpkPub = decodeBase64(bob.bundle.signedPreKey.publicKeyB64);
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true);
-  const bobState = initRatchet(bobRoot, new Uint8Array(), false, {
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true);
+  const bobState = initRatchet('self', bobRoot, new Uint8Array(), false, {
     publicKey: bobSpkPub,
     secretKey: pk(bob.secrets.signedPreKey.secretStored),
   });

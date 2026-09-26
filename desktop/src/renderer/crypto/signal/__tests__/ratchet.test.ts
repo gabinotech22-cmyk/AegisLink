@@ -80,8 +80,8 @@ function newSession(): Session {
   );
 
   const bobSpkPub = decodeBase64(bobPreKeys.signedPreKey.publicKeyB64);
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true);
-  const bobState = initRatchet(bobRoot, new Uint8Array(), false, {
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true);
+  const bobState = initRatchet('self', bobRoot, new Uint8Array(), false, {
     publicKey: bobSpkPub,
     secretKey: pk(bobPreKeys.signedPreKey.secretStored),
   });
@@ -127,8 +127,9 @@ function newHybridSession(): Session {
   const bobSpkPub = decodeBase64(bobPreKeys.signedPreKey.publicKeyB64);
   const bobPqPub = decodeBase64(bobPreKeys.pqSignedPreKey.publicKeyB64);
 
-  const aliceState = initRatchet(x.rootKey, bobSpkPub, true, undefined, null, bobPqPub);
+  const aliceState = initRatchet('self', x.rootKey, bobSpkPub, true, undefined, null, bobPqPub);
   const bobState = initRatchet(
+    'self',
     bobRoot,
     new Uint8Array(),
     false,
@@ -289,12 +290,14 @@ describe('R1 — hybrid PQ ratchet', () => {
 
   it('PQ public key rotates on every chain turn (fresh ML-KEM keypair per turn)', () => {
     const { aliceState, bobState } = newHybridSession();
-    const round1 = encodeBase64(aliceState.PQs!.publicKey);
+    // Alice's PQ public key is what her messages advertise (the state itself is sealed in the vault).
+    const a0 = enc(aliceState, 'a0');
+    const round1 = encodeBase64(a0.header.pqPub!);
     // Bob replies → Alice ratchets and regenerates her PQ pair.
-    expect(dec(bobState, enc(aliceState, 'a0'))).toBe('a0');
+    expect(dec(bobState, a0)).toBe('a0');
     const reply = enc(bobState, 'b0');
     expect(dec(aliceState, reply)).toBe('b0');
-    const round2 = encodeBase64(aliceState.PQs!.publicKey);
+    const round2 = encodeBase64(enc(aliceState, 'a1').header.pqPub!);
     expect(round2).not.toBe(round1);
   });
 
@@ -364,12 +367,14 @@ describe('R1 — hybrid PQ ratchet', () => {
 
   it('classic session never populates PQ state (byte-identity with pre-R1 path)', () => {
     const { aliceState, bobState } = newSession();
-    // No PQ keypairs or advertised ciphertext anywhere in a v1 session.
-    expect(aliceState.PQs ?? null).toBeNull();
-    expect(aliceState.PQr ?? null).toBeNull();
-    expect(aliceState.pqSendCt ?? null).toBeNull();
-    expect(bobState.PQs ?? null).toBeNull();
-    expect(bobState.PQr ?? null).toBeNull();
+    // No PQ keypairs anywhere in a v1 session (the vault's public view says so;
+    // its own tests check the sealed state itself: main/crypto/vault/__tests__/ratchet.test.ts).
+    expect(aliceState.info.hybrid).toBe(false);
+    expect(bobState.info.hybrid).toBe(false);
+    const out = enc(aliceState, 'x');
+    expect(dec(bobState, out)).toBe('x');
+    expect(enc(bobState, 'y').header.pqPub).toBeUndefined();
+    expect(bobState.info.hybrid).toBe(false);
   });
 });
 
@@ -417,6 +422,8 @@ describe('Double Ratchet — MAX_SKIPPED_KEYS bound', () => {
     }
     const tail = msgs[MAX_SKIPPED_KEYS];
     expect(dec(bobState, tail)).toBe('m' + MAX_SKIPPED_KEYS);
-    expect(bobState.MKSKIPPED.size).toBeLessThanOrEqual(MAX_SKIPPED_KEYS);
+    // Every one of the MAX_SKIPPED_KEYS skipped messages still decrypts (the cap
+    // itself: main/crypto/vault/__tests__/ratchet.test.ts).
+    for (let i = 0; i < MAX_SKIPPED_KEYS; i++) expect(dec(bobState, msgs[i])).toBe('m' + i);
   });
 });

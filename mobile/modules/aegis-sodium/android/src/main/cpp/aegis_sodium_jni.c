@@ -315,3 +315,50 @@ FN(vaultLiveKeys)(JNIEnv *env, jclass cls) {
   (void) cls;
   return (jint) aegis_vault_live_keys();
 }
+
+/* ── Double Ratchet in the vault (F-1b phase 3) ────────────────────────── */
+
+FN(ratchetInitAlice)(JNIEnv *env, jclass cls, jobject blob, jobject info, jobject slot, jobject rk, jobject dhr,
+                     jobject pqr) {
+  (void) cls;
+  SPANS(6, blob, info, slot, rk, dhr, pqr)
+  return aegis_ratchet_init_alice(S(0), S(1), S(2), S(3), S(4), S(5));
+}
+
+FN(ratchetInitBob)(JNIEnv *env, jclass cls, jobject blob, jobject info, jobject slot, jobject rk, jobject spk,
+                   jobject pqspk) {
+  uint32_t sh, ph = 0;
+  (void) cls;
+  SPANS(6, blob, info, slot, rk, spk, pqspk)
+  if (in_handle(&s[4], &sh) != 0) return AEGIS_EBADLEN;
+  /* An empty PQSPK is a classic session (handle 0 is never a live key). */
+  if (s[5].len != 0 && in_handle(&s[5], &ph) != 0) return AEGIS_EBADLEN;
+  return aegis_ratchet_init_bob(S(0), S(1), S(2), S(3), sh, ph);
+}
+
+FN(ratchetEncrypt)(JNIEnv *env, jclass cls, jobject blobOut, jobject info, jobject hdr, jobject box, jobject slot,
+                   jobject blob, jobject m) {
+  (void) cls;
+  SPANS(7, blobOut, info, hdr, box, slot, blob, m)
+  return aegis_ratchet_encrypt(S(0), S(1), S(2), S(3), S(4), S(5), S(6));
+}
+
+FN(ratchetDecrypt)(JNIEnv *env, jclass cls, jobject blobOut, jobject info, jobject m, jobject slot, jobject blob,
+                   jobject hdr, jobject box) {
+  (void) cls;
+  SPANS(7, blobOut, info, m, slot, blob, hdr, box)
+  return aegis_ratchet_decrypt(S(0), S(1), S(2), S(3), S(4), S(5), S(6));
+}
+
+FN(ratchetTrim)(JNIEnv *env, jclass cls, jobject blobOut, jobject info, jobject slot, jobject blob, jint maxAge) {
+  (void) cls;
+  if (maxAge < 0) return AEGIS_EBADLEN;
+  SPANS(4, blobOut, info, slot, blob)
+  return aegis_ratchet_trim(S(0), S(1), S(2), S(3), (uint32_t) maxAge);
+}
+
+FN(ratchetImport)(JNIEnv *env, jclass cls, jobject blobOut, jobject info, jobject slot, jobject raw) {
+  (void) cls;
+  SPANS(4, blobOut, info, slot, raw)
+  return aegis_ratchet_import(S(0), S(1), S(2), S(3));
+}

@@ -1999,7 +1999,7 @@ async function getOrCreateSession(
 async function getOrCreateSessionLocked(contactAegisId: string, contactPublicKeyB64: string, identity: Identity): Promise<RatchetState> {
   const existingJson = await loadRatchetSession(contactAegisId);
   if (existingJson) {
-    const s = reviveRatchetState(existingJson);
+    const s = reviveRatchetState(existingJson, identity.secretKey.slot);
     return s as RatchetState;
   }
 
@@ -2125,6 +2125,7 @@ async function getOrCreateSessionLocked(contactAegisId: string, contactPublicKey
     ? decodeBase64(bundle.pqSignedPreKey.publicKeyB64)
     : null;
   const ratchetState = initRatchet(
+    identity.secretKey.slot,
     x3dh.rootKey,
     decodeBase64(bundle.signedPreKey.publicKeyB64),
     true,
@@ -2132,6 +2133,7 @@ async function getOrCreateSessionLocked(contactAegisId: string, contactPublicKey
     undefined,
     initialPQr,
   );
+  x3dh.rootKey.fill(0); // the vault holds its own copy now
 
   // Attach Alice's Ephemeral Key and Bob's PreKey IDs for Bob's X3DH receiver calculation.
   // PQXDH (v2): when performX3DH negotiated v2 (bundle.pqSignedPreKey was present
@@ -2296,7 +2298,7 @@ async function sendNudgeOverExistingSession(
   if (!existingJson) return false; // nothing to nudge over — just wait/adopt
   let session: RatchetState;
   try {
-    const s = reviveRatchetState(existingJson);
+    const s = reviveRatchetState(existingJson, identity.secretKey.slot);
     session = s as RatchetState;
   } catch {
     return false;
@@ -2569,7 +2571,7 @@ async function decryptAndAppendLocked(
 
   let loadedRatchetState: RatchetState | null = null;
   if (existingJson) {
-    loadedRatchetState = reviveRatchetState(existingJson);
+    loadedRatchetState = reviveRatchetState(existingJson, identity.secretKey.slot);
 
     // PREVENT REPLAY ATTACKS ON X3DH INIT (State Downgrade / DoS)
     // If the message contains an x3dhInit but we already have an established session,
@@ -2750,10 +2752,11 @@ async function decryptAndAppendLocked(
     const initialPQs = pqInputs
       ? { publicKey: pqInputs.pqSpkSecret.publicKey, secretKey: pqInputs.pqSpkSecret }
       : null;
-    ratchetState = initRatchet(rootKey, decodeBase64(parsed.ratchet.ratchetKeyB64), false, {
+    ratchetState = initRatchet(identity.secretKey.slot, rootKey, decodeBase64(parsed.ratchet.ratchetKeyB64), false, {
       publicKey: spkPublicKey,
       secretKey: mySpkSecret,
     }, initialPQs);
+    rootKey.fill(0); // the vault holds its own copy now
 
     // [RDIAG] Dev-only (rdiag). Adopting an inbound X3DH init.
     // Logs whether this replaced an existing (recovery) session — the convergence
@@ -2815,7 +2818,7 @@ async function decryptAndAppendLocked(
   if (!plaintextBytes) {
     // [RDIAG] MAC-failure forensics: which session state rejected which header.
     rdiag(
-      `[RDIAG] ratchet-null me=${identity.aegisId} peer=${contact.aegisId} hdr(n=${rHeader.n} pn=${rHeader.pn} pq=${!!rHeader.pqPub}) st(Ns=${ratchetState.Ns} Nr=${ratchetState.Nr} hasCKr=${!!ratchetState.CKr} hybrid=${!!ratchetState.PQs} ageMs=${ratchetState.createdAtMs ? Date.now() - ratchetState.createdAtMs : -1}) x3dh=${!!parsed.x3dh} existing=${!!existingJson}`,
+      `[RDIAG] ratchet-null me=${identity.aegisId} peer=${contact.aegisId} hdr(n=${rHeader.n} pn=${rHeader.pn} pq=${!!rHeader.pqPub}) st(Ns=${ratchetState.info.Ns} Nr=${ratchetState.info.Nr} hasCKr=${ratchetState.info.hasCKr} hybrid=${ratchetState.info.hybrid} ageMs=${ratchetState.createdAtMs ? Date.now() - ratchetState.createdAtMs : -1}) x3dh=${!!parsed.x3dh} existing=${!!existingJson}`,
     );
     // Desync auto-recovery: we get here only because the OUTER sealed-sender box
     // already authenticated this as a genuine message from `contact` (the caller
@@ -4276,11 +4279,11 @@ async function handleIncoming(
 // for this module). The flow degrades gracefully: handleSelfCopy logs a
 // warning and drops the message; the recipient still received it correctly.
 
-async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
+async function getSelfRatchet(identity: Identity): Promise<RatchetState | null> {
   try {
-    const raw = await SecureStore.getItemAsync(SECURE_SELF_RATCHET_KEY(myAegisId));
+    const raw = await SecureStore.getItemAsync(SECURE_SELF_RATCHET_KEY(identity.aegisId));
     if (!raw) return null;
-    const s = reviveRatchetState(raw);
+    const s = reviveRatchetState(raw, identity.secretKey.slot);
     return s as RatchetState;
   } catch (e) {
     if (__DEV__) logger.warn('[socket] getSelfRatchet read failed:', (e as Error).message);
@@ -4290,22 +4293,8 @@ async function getSelfRatchet(myAegisId: string): Promise<RatchetState | null> {
 
 async function saveSelfRatchet(myAegisId: string, state: RatchetState): Promise<void> {
   trimOldSkippedKeys(state, MAX_SKIPPED_KEYS);
-  const serialized = {
-    RK: state.RK,
-    DHs: state.DHs,
-    DHr: state.DHr,
-    CKs: state.CKs,
-    CKr: state.CKr,
-    Ns: state.Ns,
-    Nr: state.Nr,
-    PN: state.PN,
-    MKSKIPPED: Array.from(state.MKSKIPPED.entries()),
-    x3dhInit: state.x3dhInit,
-  };
-  await SecureStore.setItemAsync(
-    SECURE_SELF_RATCHET_KEY(myAegisId),
-    JSON.stringify(serialized),
-  );
+  // The one serializer (ratchetSerde): the vault-sealed state, never raw keys.
+  await SecureStore.setItemAsync(SECURE_SELF_RATCHET_KEY(myAegisId), serializeRatchetState(state));
 }
 
 /**
@@ -4340,10 +4329,12 @@ async function initSelfSession(identity: Identity, sock: Socket): Promise<Ratche
 
   const x3dh = performX3DH(identity, bundle);
   const ratchetState = initRatchet(
+    identity.secretKey.slot,
     x3dh.rootKey,
     decodeBase64(bundle.signedPreKey.publicKeyB64),
     true,
   );
+  x3dh.rootKey.fill(0); // the vault holds its own copy now
   ratchetState.x3dhInit = {
     aliceEKB64: x3dh.myEphemeralPublicKeyB64,
     spkId: bundle.signedPreKey.keyId,
@@ -4375,7 +4366,7 @@ async function sendSelfCopy(
   if (meta.ephemeralSeconds !== undefined && meta.ephemeralSeconds > 0 && meta.ephemeralSeconds < 5) return;
 
   try {
-    let ratchet = await getSelfRatchet(identity.aegisId);
+    let ratchet = await getSelfRatchet(identity);
     if (!ratchet) {
       ratchet = await initSelfSession(identity, sock);
     }
@@ -4521,7 +4512,7 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     return;
   }
 
-  let ratchet = await getSelfRatchet(identity.aegisId);
+  let ratchet = await getSelfRatchet(identity);
   if (!ratchet) {
     // First self-copy received on this device — derive the session as Bob
     // using OUR OWN SPK secret. If we don't have an SPK secret stored
@@ -4580,10 +4571,11 @@ async function handleSelfCopy(env: WireSealedEnvelope, identity: Identity): Prom
     }
     const spkPub = mySpkSecret.publicKey;
     const rHeader = parsed.ratchet as { ratchetKeyB64: string };
-    ratchet = initRatchet(rootKey, decodeBase64(rHeader.ratchetKeyB64), false, {
+    ratchet = initRatchet(identity.secretKey.slot, rootKey, decodeBase64(rHeader.ratchetKeyB64), false, {
       publicKey: spkPub,
       secretKey: mySpkSecret,
     });
+    rootKey.fill(0); // the vault holds its own copy now
   }
 
   const r = parsed.ratchet as { ratchetKeyB64: string; n: number; pn: number; ciphertextB64: string; nonceB64: string };

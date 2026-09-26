@@ -4,13 +4,14 @@
  * (`__tests__/directBridge.ts`). Handles are numbers; keys come back only
  * through `exportSecret`, after the user confirms it in a native dialog
  * (`VaultHooks`). Otherwise the renderer receives public keys, blobs,
- * signatures and the shared secrets that X3DH/ratchet still need in the
- * renderer until phase 3.
+ * signatures, the shared secrets X3DH still needs in the renderer, and
+ * Double Ratchet states only SEALED (phase 3, `ratchet.ts`).
  *
  * `runVaultOp` never throws (sendSync cannot carry an exception): it returns an
  * envelope the renderer facade turns back into the same error.
  */
 import { KeyVault, VaultError, type VaultKeyType } from './vault'
+import { VaultRatchet } from './ratchet'
 
 export type VaultResult =
   | { ok: true; value: unknown }
@@ -64,6 +65,22 @@ const type = (v: unknown): VaultKeyType => {
 
 type Op = (vault: KeyVault, a: unknown[], hooks: VaultHooks) => unknown
 
+const ratchets = new WeakMap<KeyVault, VaultRatchet>()
+const ratchet = (v: KeyVault): VaultRatchet => {
+  let r = ratchets.get(v)
+  if (!r) {
+    r = new VaultRatchet(v)
+    ratchets.set(v, r)
+  }
+  return r
+}
+const handleOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : num(v))
+const bytesOrNull = (v: unknown): Uint8Array | null => (v === null || v === undefined ? null : bytes(v))
+const u32 = (v: unknown): number => {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 0xffffffff) throw new VaultError('BAD_ARG', 'bad number')
+  return v
+}
+
 const OPS: Record<string, Op> = {
   unlock: (v, a) => v.unlock(str(a[0])),
   lock: (v, a) => v.lock(str(a[0])),
@@ -100,6 +117,13 @@ const OPS: Record<string, Op> = {
   boxOpen: (v, a) => v.boxOpen(num(a[0]), bytes(a[1]), bytes(a[2]), bytes(a[3])),
   mlkemDecapsulate: (v, a) => v.mlkemDecapsulate(num(a[0]), bytes(a[1])),
   liveKeys: (v) => v.liveKeys(),
+  // Double Ratchet (phase 3): states cross to the renderer only sealed.
+  ratchetInitAlice: (v, a) => ratchet(v).initAlice(str(a[0]), bytes(a[1]), bytes(a[2]), bytesOrNull(a[3])),
+  ratchetInitBob: (v, a) => ratchet(v).initBob(str(a[0]), bytes(a[1]), num(a[2]), handleOrNull(a[3])),
+  ratchetEncrypt: (v, a) => ratchet(v).encrypt(str(a[0]), bytes(a[1]), bytes(a[2])),
+  ratchetDecrypt: (v, a) => ratchet(v).decrypt(str(a[0]), bytes(a[1]), a[2], bytes(a[3])),
+  ratchetTrim: (v, a) => ratchet(v).trim(str(a[0]), bytes(a[1]), u32(a[2])),
+  ratchetImport: (v, a) => ratchet(v).import(str(a[0]), a[1]),
 }
 
 export function runVaultOp(vault: KeyVault, op: unknown, args: unknown, hooks: VaultHooks = NO_EXPORTS): VaultResult {

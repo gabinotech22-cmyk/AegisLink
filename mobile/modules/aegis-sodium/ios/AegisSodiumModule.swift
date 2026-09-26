@@ -149,6 +149,33 @@ public class AegisSodiumModule: Module {
       return Int(aegis_vault_export(k, Int32(type), mp(out), n(out)))
     }
     Function("vaultLiveKeys") { () -> Int in Int(aegis_vault_live_keys()) }
+    // ── Double Ratchet in the vault (F-1b phase 3): the state crosses JS only sealed.
+    Function("ratchetInitAlice") { (blob: Uint8Array, info: Uint8Array, slot: Uint8Array, rk: Uint8Array, dhr: Uint8Array, pqr: Uint8Array) -> Int in
+      Int(aegis_ratchet_init_alice(mp(blob), n(blob), mp(info), n(info), p(slot), n(slot), p(rk), n(rk), p(dhr), n(dhr), p(pqr), n(pqr)))
+    }
+    Function("ratchetInitBob") { (blob: Uint8Array, info: Uint8Array, slot: Uint8Array, rk: Uint8Array, spk: Uint8Array, pqspk: Uint8Array) -> Int in
+      guard let sh = hIn(spk) else { return -1 }
+      // An empty PQSPK is a classic session (handle 0 is never a live key).
+      var ph: UInt32 = 0
+      if pqspk.byteLength != 0 {
+        guard let h = hIn(pqspk) else { return -1 }
+        ph = h
+      }
+      return Int(aegis_ratchet_init_bob(mp(blob), n(blob), mp(info), n(info), p(slot), n(slot), p(rk), n(rk), sh, ph))
+    }
+    Function("ratchetEncrypt") { (blobOut: Uint8Array, info: Uint8Array, hdr: Uint8Array, box: Uint8Array, slot: Uint8Array, blob: Uint8Array, m: Uint8Array) -> Int in
+      Int(aegis_ratchet_encrypt(mp(blobOut), n(blobOut), mp(info), n(info), mp(hdr), n(hdr), mp(box), n(box), p(slot), n(slot), p(blob), n(blob), p(m), n(m)))
+    }
+    Function("ratchetDecrypt") { (blobOut: Uint8Array, info: Uint8Array, m: Uint8Array, slot: Uint8Array, blob: Uint8Array, hdr: Uint8Array, box: Uint8Array) -> Int in
+      Int(aegis_ratchet_decrypt(mp(blobOut), n(blobOut), mp(info), n(info), mp(m), n(m), p(slot), n(slot), p(blob), n(blob), p(hdr), n(hdr), p(box), n(box)))
+    }
+    Function("ratchetTrim") { (blobOut: Uint8Array, info: Uint8Array, slot: Uint8Array, blob: Uint8Array, maxAge: Int) -> Int in
+      guard maxAge >= 0, maxAge <= Int(UInt32.max) else { return -1 }
+      return Int(aegis_ratchet_trim(mp(blobOut), n(blobOut), mp(info), n(info), p(slot), n(slot), p(blob), n(blob), UInt32(maxAge)))
+    }
+    Function("ratchetImport") { (blobOut: Uint8Array, info: Uint8Array, slot: Uint8Array, raw: Uint8Array) -> Int in
+      Int(aegis_ratchet_import(mp(blobOut), n(blobOut), mp(info), n(info), p(slot), n(slot), p(raw), n(raw)))
+    }
     // Hundreds of milliseconds of work: async (off the JS thread), so it cannot
     // touch JS memory. Expo copies the password and salt into `Data` on the JS
     // thread; the key comes back as an int array. Copies made here are zeroed.

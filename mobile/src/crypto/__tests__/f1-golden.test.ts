@@ -101,8 +101,8 @@ function generateTranscript(hybrid: boolean): Transcript {
   const root = nacl.randomBytes(32);
   const spk = nacl.box.keyPair();
   const pq = hybrid ? ml_kem768.keygen() : null;
-  const alice = initRatchet(new Uint8Array(root), spk.publicKey, true, undefined, null, pq ? pq.publicKey : null);
-  const bob = initRatchet(new Uint8Array(root), new Uint8Array(), false, spk, pq, null);
+  const alice = initRatchet('self', new Uint8Array(root), spk.publicKey, true, undefined, null, pq ? pq.publicKey : null);
+  const bob = initRatchet('self', new Uint8Array(root), new Uint8Array(), false, spk, pq, null);
   const bobState = serializeRatchetState(bob);
   const texts = ['golden-1', 'golden-2 (delivered last)', 'golden-3'];
   const aliceMsgs = texts.map((t) => toWire(ratchetEncrypt(alice, utf8.encode(t)), t));
@@ -188,13 +188,13 @@ describe('F-1 golden fixtures (pre-libsodium output must stay valid)', () => {
   for (const kind of ['classic', 'hybrid'] as const) {
     it(`a persisted ${kind} ratchet session keeps decrypting (incl. out-of-order)`, () => {
       const t = golden.ratchet[kind];
-      const bob = reviveRatchetState(t.bobState);
+      const bob = reviveRatchetState(t.bobState, 'self');
       const [m1, m2, m3] = t.aliceMsgs;
       expect(decryptWire(bob, m1)).toBe(m1.plaintext);
       expect(decryptWire(bob, m3)).toBe(m3.plaintext);
       expect(decryptWire(bob, m2)).toBe(m2.plaintext); // from MKSKIPPED
 
-      const alice = reviveRatchetState(t.aliceStateAfterSend);
+      const alice = reviveRatchetState(t.aliceStateAfterSend, 'self');
       expect(decryptWire(alice, t.bobReply)).toBe(t.bobReply.plaintext); // DH ratchet step
     });
   }

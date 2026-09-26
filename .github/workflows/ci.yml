@@ -307,6 +307,7 @@ jobs:
           cmake -S modules/aegis-sodium/test -B build/aegis-sodium -G Ninja -DCMAKE_BUILD_TYPE=Release
           ninja -C build/aegis-sodium
           node modules/aegis-sodium/test/differential.mjs build/aegis-sodium/aegis_sodium_cli
+          node --experimental-strip-types --no-warnings modules/aegis-sodium/test/ratchet-interop.mjs build/aegis-sodium/aegis_sodium_cli
 
       - name: Build and diff the C core (ASan + UBSan)
         env:
@@ -317,6 +318,7 @@ jobs:
             -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
           ninja -C build/aegis-sodium-asan
           node modules/aegis-sodium/test/differential.mjs build/aegis-sodium-asan/aegis_sodium_cli
+          node --experimental-strip-types --no-warnings modules/aegis-sodium/test/ratchet-interop.mjs build/aegis-sodium-asan/aegis_sodium_cli
 
   # ─── Desktop — typecheck + tests (Electron main/renderer, vitest) ─────────
   # Golden rule #11: the desktop client MUST have a CI test suite covering IPC,

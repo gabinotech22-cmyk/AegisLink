@@ -23,6 +23,18 @@ export const AEGIS_EBADLEN = -1;
 export const AEGIS_EFAIL = -2;
 /** Vault: profile locked, or handle unknown / released / of another type. */
 export const AEGIS_ENOKEY = -3;
+/** Ratchet (F-1b phase 3, cpp/aegis_vault.h): the sealed state does not open or is malformed. */
+export const AEGIS_ERATCHET_STATE = -10;
+/** No sending chain (encrypt) or no receiving chain (decrypt). */
+export const AEGIS_ERATCHET_NO_CHAIN = -11;
+/** More than MAX_SKIPPED_KEYS messages skipped in one jump. */
+export const AEGIS_ERATCHET_TOO_MANY_SKIPPED = -12;
+/** The peer's ratchet key gives an all-zero X25519 output (low-order point). */
+export const AEGIS_ERATCHET_LOW_ORDER = -13;
+/** A hybrid session got a chain turn without its ML-KEM material. */
+export const AEGIS_ERATCHET_DOWNGRADE = -14;
+/** Bad or degenerate ML-KEM material (all-zero shared secret). */
+export const AEGIS_ERATCHET_PQ = -15;
 
 type B = Uint8Array;
 
@@ -64,6 +76,18 @@ export interface AegisSodiumNative {
   vaultMlkem768Dec(handle: B, ss: B, ct: B): number;
   vaultExport(handle: B, type: number, out: B): number;
   vaultLiveKeys(): number;
+  // ── Double Ratchet in the vault (F-1b phase 3, cpp/aegis_vault.h). The state
+  // only ever leaves the C core sealed (`blob`, ratchetState.ts layout inside);
+  // `info` gets its non-secret view. Buffers: `hdr` RATCHET_HEADER_LEN,
+  // `info` RATCHET_INFO_LEN, `box` = nonce(24) | ciphertext. EVERIFY from
+  // ratchetDecrypt: the message does not authenticate and nothing was written.
+  ratchetInitAlice(blobOut: B, info: B, slot: B, rk: B, dhr: B, pqr: B): number;
+  ratchetInitBob(blobOut: B, info: B, slot: B, rk: B, spk: B, pqspk: B): number;
+  ratchetEncrypt(blobOut: B, info: B, hdr: B, box: B, slot: B, blob: B, m: B): number;
+  ratchetDecrypt(blobOut: B, info: B, m: B, slot: B, blob: B, hdr: B, box: B): number;
+  ratchetTrim(blobOut: B, info: B, slot: B, blob: B, maxAge: number): number;
+  /** One-time migration of a pre-F-1b session (raw state, ratchetState.ts layout). */
+  ratchetImport(blobOut: B, info: B, slot: B, raw: B): number;
   mlkem768Keypair(pk: B, sk: B): number;
   mlkem768SeedKeypair(pk: B, sk: B, seed: B): number;
   mlkem768Enc(ct: B, ss: B, pk: B): number;

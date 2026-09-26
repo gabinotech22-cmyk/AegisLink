@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "aegis_sodium.h"
+#include "aegis_vault_internal.h"
 
 #define MLKEM_EK_OFFSET 1152
 #define MLKEM_PK_LEN 1184
@@ -307,47 +308,55 @@ int aegis_vault_import(uint32_t *handle, uint8_t *blob, size_t bloblen, uint8_t 
   return rc;
 }
 
+/* Open a blob of type `t` for slot index `s` into `plain` (plen = 2 + slotlen + len): the
+ * type and slot inside the box must be the header's type and this slot, so a
+ * blob of another profile never opens here, and an edited header type (say,
+ * an identity key relabelled as a prekey) never opens at all. Caller holds the mutex. */
+static int unwrap(uint8_t *plain, size_t plen, int s, int t, const uint8_t *blob, size_t bloblen) {
+  size_t slotlen = slots[s].slotlen;
+  int rc;
+  sodium_mprotect_readonly(slots[s].kek);
+  rc = crypto_secretbox_open_easy(plain, blob + AEGIS_VAULT_BLOB_HEADER, bloblen - AEGIS_VAULT_BLOB_HEADER, blob + 4,
+                                  slots[s].kek) == 0
+           ? AEGIS_OK
+           : AEGIS_EVERIFY;
+  sodium_mprotect_noaccess(slots[s].kek);
+  if (rc == AEGIS_OK && (plen < 2 + slotlen || plain[0] != (uint8_t) t || plain[1] != slotlen ||
+                         sodium_memcmp(plain + 2, slots[s].slot, slotlen) != 0))
+    rc = AEGIS_EVERIFY;
+  return rc;
+}
+
+/* A blob's header is v2, of type `t`, and exactly as long as a `len`-byte payload for `slotlen`. */
+static int blob_shape_ok(const uint8_t *blob, size_t bloblen, int t, size_t slotlen, size_t len) {
+  return blob != NULL && len != 0 && bloblen == AEGIS_VAULT_BLOB_LEN(slotlen, len) && blob[0] == 'A' &&
+         blob[1] == 'V' && blob[2] == AEGIS_VAULT_BLOB_VERSION && blob[3] == (uint8_t) t;
+}
+
 int aegis_vault_load(uint32_t *handle, int *type, uint8_t *pub, size_t publen, const uint8_t *slot,
                      size_t slotlen, const uint8_t *blob, size_t bloblen) {
   uint8_t *plain;
   size_t plen, len;
   int s, t, k, rc;
   if (handle == NULL || type == NULL || blob == NULL || !slot_args_ok(slot, slotlen)) return AEGIS_EBADLEN;
-  if (bloblen < AEGIS_VAULT_BLOB_HEADER + crypto_secretbox_MACBYTES + 2 || blob[0] != 'A' || blob[1] != 'V' ||
-      blob[2] != AEGIS_VAULT_BLOB_VERSION)
-    return AEGIS_EBADLEN;
+  if (bloblen < AEGIS_VAULT_BLOB_HEADER + crypto_secretbox_MACBYTES + 2) return AEGIS_EBADLEN;
   t = blob[3];
   len = aegis_vault_key_len(t);
-  if (len == 0 || bloblen != AEGIS_VAULT_BLOB_LEN(slotlen, len)) return AEGIS_EBADLEN;
+  if (!blob_shape_ok(blob, bloblen, t, slotlen, len)) return AEGIS_EBADLEN;
   plen = 2 + slotlen + len;
   plain = sodium_malloc(plen);
   if (plain == NULL) return AEGIS_EFAIL;
   pthread_mutex_lock(&mu);
   s = find_slot(slot, slotlen);
-  if (s < 0) {
-    rc = AEGIS_ENOKEY;
-  } else {
-    sodium_mprotect_readonly(slots[s].kek);
-    rc = crypto_secretbox_open_easy(plain, blob + AEGIS_VAULT_BLOB_HEADER, bloblen - AEGIS_VAULT_BLOB_HEADER,
-                                    blob + 4, slots[s].kek) == 0
-             ? AEGIS_OK
-             : AEGIS_EVERIFY;
-    sodium_mprotect_noaccess(slots[s].kek);
-    /* The type and slot inside the box must be the header's type and this slot:
-     * a blob of another profile never loads here, and an edited header type
-     * (say, an identity key relabelled as a prekey) never loads at all. */
-    if (rc == AEGIS_OK && (plain[0] != (uint8_t) t || plain[1] != slotlen ||
-                           sodium_memcmp(plain + 2, slot, slotlen) != 0))
-      rc = AEGIS_EVERIFY;
-    if (rc == AEGIS_OK) rc = public_of(t, plain + 2 + slotlen, pub, publen);
-    if (rc == AEGIS_OK) {
-      k = store_key(s, t, plain + 2 + slotlen, len);
-      if (k < 0) {
-        rc = AEGIS_EFAIL;
-      } else {
-        *handle = make_handle(k);
-        *type = t;
-      }
+  rc = s < 0 ? AEGIS_ENOKEY : unwrap(plain, plen, s, t, blob, bloblen);
+  if (rc == AEGIS_OK) rc = public_of(t, plain + 2 + slotlen, pub, publen);
+  if (rc == AEGIS_OK) {
+    k = store_key(s, t, plain + 2 + slotlen, len);
+    if (k < 0) {
+      rc = AEGIS_EFAIL;
+    } else {
+      *handle = make_handle(k);
+      *type = t;
     }
   }
   pthread_mutex_unlock(&mu);
@@ -492,4 +501,55 @@ size_t aegis_vault_live_keys(void) {
   for (k = 0; k < AEGIS_VAULT_MAX_KEYS; k++) n += keys[k].used ? 1 : 0;
   pthread_mutex_unlock(&mu);
   return n;
+}
+
+/* ── Internal (aegis_vault_internal.h): sealed payloads of other C modules ── */
+
+int aegis_vault_seal_payload(uint8_t *blob, size_t bloblen, const uint8_t *slot, size_t slotlen, int type,
+                             const uint8_t *plain, size_t len) {
+  int s, rc;
+  if (!slot_args_ok(slot, slotlen) || blob == NULL || plain == NULL || len == 0) return AEGIS_EBADLEN;
+  pthread_mutex_lock(&mu);
+  s = find_slot(slot, slotlen);
+  rc = s < 0 ? AEGIS_ENOKEY : wrap(blob, bloblen, s, type, plain, len);
+  pthread_mutex_unlock(&mu);
+  return rc;
+}
+
+int aegis_vault_open_payload(uint8_t *out, size_t len, const uint8_t *slot, size_t slotlen, int type,
+                             const uint8_t *blob, size_t bloblen) {
+  uint8_t *plain;
+  size_t plen;
+  int s, rc;
+  if (!slot_args_ok(slot, slotlen) || out == NULL) return AEGIS_EBADLEN;
+  if (!blob_shape_ok(blob, bloblen, type, slotlen, len)) return AEGIS_EBADLEN;
+  plen = 2 + slotlen + len;
+  plain = sodium_malloc(plen);
+  if (plain == NULL) return AEGIS_EFAIL;
+  pthread_mutex_lock(&mu);
+  s = find_slot(slot, slotlen);
+  rc = s < 0 ? AEGIS_ENOKEY : unwrap(plain, plen, s, type, blob, bloblen);
+  if (rc == AEGIS_OK) memcpy(out, plain + 2 + slotlen, len);
+  pthread_mutex_unlock(&mu);
+  sodium_free(plain);
+  return rc;
+}
+
+int aegis_vault_read_secret(uint32_t handle, int want_type, const uint8_t *slot, size_t slotlen, uint8_t *out,
+                            size_t outlen) {
+  int k, s, rc = AEGIS_OK;
+  if (!slot_args_ok(slot, slotlen) || out == NULL || outlen != aegis_vault_key_len(want_type)) return AEGIS_EBADLEN;
+  pthread_mutex_lock(&mu);
+  k = key_index(handle);
+  s = find_slot(slot, slotlen);
+  /* Only a key of this very profile: a session of one profile never starts from another's prekey. */
+  if (k < 0 || s < 0 || keys[k].slot != s || !type_ok(keys[k].type, want_type)) {
+    rc = AEGIS_ENOKEY;
+  } else {
+    sodium_mprotect_readonly(keys[k].secret);
+    memcpy(out, keys[k].secret, outlen);
+    sodium_mprotect_noaccess(keys[k].secret);
+  }
+  pthread_mutex_unlock(&mu);
+  return rc;
 }
